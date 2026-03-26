@@ -37,6 +37,26 @@ Massively scalable, durable real-time data streaming service.
 - Firehose
 - Flink (Kinesis Data Analytics)
 
+### On-Demand Mode Auto-Scaling Behaviour
+
+On-Demand mode removes the need to manually manage shard counts, but its scaling behaviour has specific characteristics the exam tests:
+
+- **Scale-up trigger:** On-Demand automatically doubles the shard count when the stream's throughput exceeds **50% of current capacity** for a sustained period (approximately 15 minutes). It does not react instantly.
+- **Scale-in cooldown:** After traffic drops, On-Demand scales back down, but there is a **4-hour cooldown** before scale-in can occur — the stream will not immediately shrink when traffic drops.
+- **Maximum shard count:** On-Demand mode supports up to **200 shards per stream** by default. For streams needing more, you must either use Provisioned mode or request a limit increase.
+- **Cost vs Provisioned:** On-Demand is more expensive per shard-hour than Provisioned at equivalent throughput. At sustained, predictable load, Provisioned mode with the right shard count is cheaper.
+
+**Decision rule:**
+```
+Traffic is unpredictable / team doesn't want to manage shard counts?
+  → On-Demand mode
+
+Traffic is stable and predictable / cost must be minimised?
+  → Provisioned mode with manually set shard count
+```
+
+**Exam pattern:** "traffic spikes unpredictably and the team doesn't want to manage shard counts manually" → On-Demand. "traffic is predictable and cost must be minimised" → Provisioned.
+
 ---
 
 ## 2. Kinesis Shard Math
@@ -161,6 +181,31 @@ Fully managed service to **load** streaming data into destinations. **Near real-
 4. Splunk
 5. HTTP Endpoint (Datadog, MongoDB, 3rd party)
 
+### Firehose → Redshift: How It Actually Works
+
+A common exam question tests whether you understand that Firehose does **not** write directly to Redshift. The actual flow is:
+
+```
+Records arrive → Firehose buffers → writes to intermediate S3 bucket
+                                            ↓
+                               Firehose issues Redshift COPY command
+                               (loads from that S3 path into Redshift)
+```
+
+**Step by step:**
+1. Records are buffered in Firehose according to your buffer settings (time/size)
+2. Firehose writes the buffer as a file to an **intermediate S3 bucket** (in the same region as your Redshift cluster)
+3. Firehose issues a `COPY` command against your Redshift cluster to load the file from S3
+
+**Consequences of this two-hop architecture:**
+- **Higher latency than S3:** Firehose → Redshift has two hops (buffer → S3 → COPY), so expect more end-to-end latency than Firehose → S3 alone
+- **Data durability during outages:** If the Redshift cluster is temporarily unavailable (maintenance, resize), data is **not lost** — it sits safely in the intermediate S3 bucket. Firehose retries the COPY automatically when the cluster becomes available
+- **Region constraint:** The intermediate S3 bucket must be in the **same region** as the Redshift cluster. Cross-region COPY is not supported by this Firehose flow
+
+**Exam patterns:**
+- "Firehose is writing to Redshift but records are appearing later than expected" → Expected behaviour. The COPY command runs after buffering — not a bug.
+- "What happens to streaming data if the Redshift cluster is resized/unavailable for 20 minutes?" → Data is preserved in the intermediate S3 bucket. Firehose retries the COPY automatically once the cluster is available. No data loss.
+
 ### Capabilities
 - **Transformation:** Invoke Lambda to transform records before delivery (e.g., JSON to CSV, masking PII)
 - **Format Conversion:** JSON to Parquet/ORC (requires Glue Table definition) - essential for S3/Athena optimization
@@ -213,3 +258,7 @@ Pay for data ingested. No idle cost. No shards to manage.
 - **Firehose can transform records with Lambda** before delivery — this is a very common exam pattern. Lambda receives a batch from Firehose, transforms the records (e.g., format conversion, PII masking), and returns them. Transformed records are then written to the destination.
 - **KCL (Kinesis Client Library)** automatically handles checkpointing (tracks last processed sequence number in DynamoDB), load balancing across multiple consumer instances, and shard leasing. On the exam, KCL is preferred over raw Lambda consumers when you need sophisticated consumer management.
 - **IteratorAgeMilliseconds** CloudWatch metric: measures how far behind the tip of the stream the consumer is. If this metric is **increasing over time**, your consumer is falling behind the stream — scale your consumers (more Lambda concurrency, more KCL workers) or increase the number of shards.
+- **On-Demand scaling is not instant:** When On-Demand mode triggers a scale-up, it takes a few minutes for the new shards to become ACTIVE. During this brief window, producers may still hit `ProvisionedThroughputExceededException`. Design producers to handle this with **exponential backoff** — the KPL does this automatically; custom SDK producers must implement it.
+- **Kinesis ordering is shard-scoped, not stream-scoped:** Records sharing the same partition key are guaranteed to be delivered **in order within their shard**. Records with DIFFERENT partition keys may be on different shards and have no ordering relationship to each other. The exam tests whether you understand that "ordering" in Kinesis is always qualified: ordered *per partition key*, not across the whole stream.
+- **Lambda bisectBatchOnFunctionError for Kinesis consumers:** By default, when Lambda fails processing a Kinesis batch, it retries the **entire batch indefinitely** until the records expire — this can block the shard for hours/days. Fix with three settings together: `bisectBatchOnFunctionError: true` (splits the batch in half on each failure to isolate the bad record in O(log n) retries), `maximumRetryAttempts: 3` (caps total retries), and `destinationConfig.onFailure` pointing to an SQS DLQ (sends poison-pill records for inspection instead of silently dropping them).
+- **Firehose cannot be a destination of Kinesis Data Streams in the Firehose console:** The connection direction is: Firehose reads **from** KDS (you set KDS as the **source** of a Firehose delivery stream). KDS does not push to Firehose. If an exam question says "configure KDS to send records to Firehose", the answer is to configure a Firehose delivery stream with KDS as its source — not a setting on KDS itself.

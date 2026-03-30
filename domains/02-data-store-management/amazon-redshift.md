@@ -49,33 +49,6 @@ Query data in **RDS** or **Aurora** directly from Redshift without ETL.
 
 ---
 
-## Performance Tuning
-
-### Distribution Styles
-How rows are distributed across compute nodes:
-
-| Style | Description | Best For |
-|-------|-------------|----------|
-| **KEY** | Rows with same key go to same node | Tables frequently joined on that key (minimizes shuffle) |
-| **ALL** | Full copy on every node | Small dimension tables (< 3M rows) |
-| **EVEN** | Round-robin distribution | No obvious join key, uniform distribution |
-| **AUTO** | Redshift decides (starts ALL, moves to EVEN/KEY) | Default, let Redshift optimize |
-
-### Sort Keys
-- Determines physical order of data on disk
-- **Zone Maps:** Redshift skips blocks that don't match the sort key range
-- Choose sort key based on WHERE clause and JOIN conditions
-- **Compound Sort Key:** Multiple columns, order matters
-- **Interleaved Sort Key:** Equal weight to all columns (good for multiple query patterns)
-
-### Workload Management (WLM)
-- Create queues to prioritize queries
-- **Short Query Acceleration (SQA):** Prioritizes small dashboard queries over long ETL runs
-- Set memory allocation per queue
-- Concurrency scaling: Add transient clusters for burst query demand
-
----
-
 ## Distribution Style Decision Guide
 
 Choosing the wrong distribution style is the #1 performance killer in Redshift. Here is the decision logic:
@@ -151,25 +124,21 @@ CREATE TABLE fact_sales (
 - You have a clear primary filter column
 
 ### Interleaved Sort Key
+
+> **Deprecated.** AWS deprecated interleaved sort keys. New tables should use compound sort keys. Existing tables with interleaved sort keys continue to work but AWS no longer recommends creating new ones.
+
 Equal weight given to each column — any column can be the primary filter.
 
-```sql
-CREATE TABLE fact_sales (
-    sale_date DATE,
-    region VARCHAR(50),
-    product_id INT
-) INTERLEAVED SORTKEY(sale_date, region, product_id);
--- Good for ad-hoc queries that filter on any combination
-```
+**Why it was deprecated:** `VACUUM REINDEX` (required to maintain interleaved sort key effectiveness after large data loads) is extremely expensive and slow — often taking longer than the data load itself. AWS found compound sort keys with careful column ordering outperform interleaved in practice.
 
-**Downside:** VACUUM REINDEX is very expensive and takes much longer than standard VACUUM. Only use interleaved if query patterns are truly unpredictable across many columns.
+**Exam implication:** If a question asks which sort key to use for unpredictable, multi-column filter patterns, the answer is still compound sort key on the most commonly filtered column — not interleaved. Interleaved is a distractor.
 
 ### Decision Rule
 ```
 Do queries almost always filter on one or two specific columns in a consistent order?
   YES → Compound sort key (put most-filtered column first)
   NO → Are query filter patterns truly unpredictable across many columns?
-         YES → Interleaved sort key (accept expensive VACUUM cost)
+         YES → Compound sort key on most common filter column (interleaved is deprecated)
          NO → Compound sort key on the most common filter column
 ```
 
@@ -190,7 +159,9 @@ You define queues with fixed concurrency slots and memory percentages.
 Redshift dynamically adjusts memory allocation and concurrency based on actual query patterns. No fixed slots — Redshift can run more simple queries concurrently and fewer complex queries.
 
 ### Short Query Acceleration (SQA)
-Redshift ML automatically estimates query execution time. Queries estimated to complete in less than N seconds (configurable) are routed to a **fast lane** that bypasses the normal WLM queue. Simple dashboard queries (SELECT COUNT, simple aggregations) skip ahead of long-running ETL queries.
+Redshift automatically estimates query execution time using an internal WLM predictor. Queries estimated to complete in less than N seconds (configurable) are routed to a **fast lane** that bypasses the normal WLM queue. Simple dashboard queries (SELECT COUNT, simple aggregations) skip ahead of long-running ETL queries.
+
+Note: SQA is part of WLM and is unrelated to **Redshift ML** (the separate feature for training ML models using `CREATE MODEL` SQL syntax).
 
 **Exam pattern:** "Dashboard users complain their queries wait in queue behind ETL jobs" → Enable SQA (routes fast queries to a dedicated lane) or enable Auto WLM.
 
@@ -246,11 +217,42 @@ ORDER BY size DESC;
 - Parallel loading from multiple files = fastest
 - Supports Parquet, ORC, CSV, JSON
 - Use MANIFEST file to specify exact files
+- **Requires an IAM role attached to the Redshift cluster** to access S3 — Redshift uses the role's permissions, not user credentials
+
+```sql
+-- COPY using an IAM role attached to the cluster
+COPY fact_sales
+FROM 's3://my-bucket/data/sales/'
+IAM_ROLE 'arn:aws:iam::123456789012:role/RedshiftS3Role'
+FORMAT AS PARQUET;
+```
+
+Exam pattern: "Grant Redshift permission to load data from S3" → Attach an IAM role with `s3:GetObject` permissions to the cluster and reference it in the COPY command.
 
 ### UNLOAD Command
 - Export Redshift query results to S3
 - Supports Parquet format
 - Use for archiving or feeding data to other services
+
+---
+
+## Enhanced VPC Routing
+
+By default, COPY and UNLOAD traffic between Redshift and S3 routes over the public internet — even if both are in the same AWS region.
+
+**Enhanced VPC Routing** forces all COPY/UNLOAD traffic to travel through your VPC, using VPC endpoints (S3 gateway endpoint) rather than the public internet.
+
+**Why it matters:**
+- Without Enhanced VPC Routing: Redshift → S3 traffic may exit your VPC via the public internet
+- With Enhanced VPC Routing: traffic stays within the AWS network, routable through VPC endpoints, VPC peering, or Direct Connect
+
+**Prerequisites when enabling:**
+- An S3 VPC gateway endpoint must be configured in the VPC — otherwise COPY/UNLOAD will fail because there is no private path to S3
+- NAT gateway or internet gateway can serve as fallback if the VPC endpoint is missing, but this defeats the purpose of Enhanced VPC Routing
+
+**Exam Patterns:**
+- "Ensure all data traffic between Redshift and S3 stays within the AWS network and never traverses the public internet" → Enable Enhanced VPC Routing + configure S3 VPC gateway endpoint
+- "COPY commands started failing after enabling Enhanced VPC Routing" → Missing S3 VPC gateway endpoint in the subnet route table
 
 ---
 
@@ -263,6 +265,106 @@ ORDER BY size DESC;
 
 ---
 
+## Redshift Data Sharing
+
+Redshift Data Sharing allows live data sharing between Redshift clusters or Redshift Serverless namespaces — in the same account or across accounts — without copying or moving any data.
+
+**The Problem It Solves:**
+
+Before Data Sharing: Team A and Team B each have their own Redshift clusters. To share data, one team must run an UNLOAD to S3, the other runs a COPY. Data is stale, duplicated, and requires a manual pipeline to keep in sync.
+
+With Data Sharing: Team A creates a datashare (a named object pointing to specific databases, schemas, or tables). Team B mounts it as a consumer cluster and queries it in real time — always seeing Team A's current data with no ETL.
+
+**Key Requirement:** Both producer and consumer must use **RA3 nodes** (or be Redshift Serverless). DC2 clusters cannot participate in Data Sharing — this is a hard constraint. A question describing a DC2 cluster asking if Data Sharing is feasible: the answer is no without migrating to RA3.
+
+**Key Concepts:**
+
+| Concept | Description |
+|---|---|
+| Datashare | Named collection of database objects (tables, views, schemas) made available for sharing |
+| Producer cluster | The cluster that owns the data and creates the datashare |
+| Consumer cluster | The cluster that mounts and queries the datashare |
+| Read-only | Consumer can only SELECT from shared objects — cannot INSERT, UPDATE, DELETE |
+
+**Same-account sharing:**
+```sql
+-- On producer cluster: create a datashare
+CREATE DATASHARE salesshare;
+
+-- Add objects to the datashare
+ALTER DATASHARE salesshare ADD SCHEMA public;
+ALTER DATASHARE salesshare ADD TABLE public.fact_sales;
+
+-- Grant access to consumer cluster
+GRANT USAGE ON DATASHARE salesshare TO NAMESPACE 'consumer-cluster-namespace-id';
+
+-- On consumer cluster: mount the datashare as a database
+CREATE DATABASE sales_from_producer FROM DATASHARE salesshare OF NAMESPACE 'producer-namespace-id';
+
+-- Query it directly
+SELECT * FROM sales_from_producer.public.fact_sales LIMIT 10;
+```
+
+**Cross-account sharing:**
+
+Same as above but uses AWS Data Exchange or direct account ID to share the datashare. The consumer account's Redshift admin must accept the share before it can be mounted.
+
+**Exam Patterns:**
+- "Two teams use separate Redshift clusters but need to query each other's data in real-time without ETL" → Redshift Data Sharing
+- "Analytics team needs read access to the transactional team's Redshift data without impacting their cluster's performance" → Data Sharing (consumer queries run on consumer cluster compute, not producer)
+- "Share live Redshift data across AWS accounts" → Cross-account Redshift Data Sharing (vs Redshift Spectrum which queries S3, not other Redshift clusters)
+
+**Data Sharing vs Redshift Spectrum vs Federated Queries:**
+
+| Feature | Data Sharing | Redshift Spectrum | Federated Queries |
+|---|---|---|---|
+| Data source | Another Redshift cluster | S3 (external tables) | RDS / Aurora |
+| Data is live? | Yes (real-time) | Yes (reads S3 directly) | Yes (reads source DB) |
+| Copy needed? | No | No | No |
+| Use case | Redshift-to-Redshift sharing | Analytics on S3 cold data | Joining Redshift with operational DB |
+
+---
+
+## Resize Operations — Elastic vs Classic
+
+When your Redshift cluster needs more or fewer nodes, there are two resize methods. Choosing the wrong one causes unnecessary downtime.
+
+| Feature | Elastic Resize | Classic Resize |
+|---|---|---|
+| Completion time | Minutes (2–10 minutes typical) | Hours (can take many hours for large clusters) |
+| Downtime | Brief read-only period during resize (cluster stays up, writes paused momentarily) | Cluster is unavailable for the entire resize duration |
+| Node type change | Cannot change node type (only node count) | Can change both node type AND node count |
+| Data redistribution | Happens in the background after resize completes | Happens during resize (blocking) |
+| Use case | Scaling node COUNT up or down on the same node type | Migrating from dc2 → ra3, or changing instance family |
+
+**When to use Elastic Resize:**
+- Adding or removing nodes of the same type (e.g., ra3.xlplus: 2 → 4 nodes)
+- You need to complete the resize with minimal impact
+- "Least downtime" or "minimal disruption" in the question → Elastic Resize
+
+**When to use Classic Resize:**
+- Migrating from an older node type to RA3 (e.g., dc2.large → ra3.xlplus)
+- Changing both node type AND count simultaneously
+- Scenario describes a major cluster overhaul during a maintenance window
+
+**Snapshot and restore (alternative to Classic Resize):**
+
+For very large clusters where Classic Resize would take many hours, the alternative is:
+1. Take a snapshot of the cluster
+2. Restore the snapshot to a new cluster with the desired node type/count
+3. UNLOAD data from old cluster and COPY to new cluster (for any data written during migration)
+4. Redirect applications to new cluster
+5. Terminate old cluster
+
+This approach minimizes actual production downtime at the cost of more manual steps.
+
+**Exam Patterns:**
+- "Scale a Redshift cluster from 4 to 8 ra3.xlplus nodes with minimum downtime" → Elastic Resize
+- "Migrate a Redshift cluster from dc2.large nodes to ra3.xlplus nodes" → Classic Resize (node type change requires Classic)
+- "Resize a Redshift cluster with zero write downtime" → Not possible with Classic Resize; use Elastic Resize (which has only a brief read-only period, not full unavailability)
+
+---
+
 ## Exam Gotchas
 
 - **COPY command** is always preferred over INSERT for bulk loading
@@ -271,7 +373,7 @@ ORDER BY size DESC;
 - **Spectrum** runs on its own compute fleet - offloads work from your cluster
 - **Vacuum** reclaims space from deleted rows and re-sorts data (auto-vacuum runs in background)
 - **ANALYZE COMPRESSION:** Recommends optimal column compression encodings
-- Redshift writes to Redshift via intermediate S3 (Firehose -> S3 -> COPY)
+- **Kinesis Firehose loads into Redshift via intermediate S3** (Firehose → S3 → COPY). Firehose cannot write to Redshift directly — it buffers to S3 first, then issues a COPY command
 - **Concurrency Scaling** = handle burst query demand without resizing cluster
 - **Upsert pattern:** Load to Staging -> Delete matching from Target -> Insert from Staging (or use MERGE)
 - **COPY command is the fastest way to load data from S3** — always choose COPY over INSERT for bulk loads. INSERT row by row is extremely slow in Redshift.
@@ -279,3 +381,6 @@ ORDER BY size DESC;
 - **Redshift Spectrum** lets you query S3 data as if it's in Redshift tables. Data stays in S3 — no loading needed. Spectrum is ideal for infrequently queried historical (cold) data that would be expensive to store in Redshift.
 - **Materialized views with AUTO REFRESH** pre-compute expensive joins and aggregations. BI dashboards that always run the same complex query should use materialized views — dramatically reduces query time and cluster load.
 - **RA3 nodes** decouple compute from storage. Data is stored in S3-based **Redshift Managed Storage (RMS)**, with frequently accessed data cached on local NVMe SSDs. You pay for compute and storage separately, so you can scale each independently.
+- **Redshift Data Sharing ≠ Redshift Spectrum.** Data Sharing is Redshift-to-Redshift live data access. Spectrum queries S3 external tables. They solve different problems — the exam will try to confuse you by offering both as options.
+- **Elastic Resize only changes node count, not node type.** If the scenario requires changing the instance family (e.g., DC2 to RA3), Elastic Resize is not an option — you must use Classic Resize or the snapshot-restore approach.
+- **Consumer cluster in Data Sharing uses its OWN compute** for queries. Sharing data does not impact the producer cluster's query performance — consumers pay for their own query execution.

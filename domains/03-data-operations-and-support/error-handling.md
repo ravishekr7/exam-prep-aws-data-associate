@@ -227,9 +227,193 @@ For FIFO queues, failed messages block the queue (messages are processed in orde
 
 ## Idempotency
 
-- Ensure processing the same message twice produces the same result
-- Critical for at-least-once delivery systems (SQS, Kinesis)
-- Techniques: deduplication IDs, conditional writes, upsert patterns
+Ensure processing the same message twice produces the same result — critical for **at-least-once delivery** systems (SQS, Kinesis, SNS).
+
+### Idempotency Implementation Patterns
+
+**1. Conditional Write (DynamoDB)**
+```python
+# Only write if the item doesn't already exist
+try:
+    dynamodb.put_item(
+        TableName='processed-events',
+        Item={'event_id': {'S': event_id}, 'result': {'S': result}},
+        ConditionExpression='attribute_not_exists(event_id)'
+    )
+except dynamodb.exceptions.ConditionalCheckFailedException:
+    # Already processed — skip safely
+    return
+```
+
+**2. SQS FIFO Deduplication**
+- Set `MessageDeduplicationId` on each message (hash of message body)
+- SQS FIFO deduplicates within a **5-minute window** — same ID = message silently dropped
+- Use content-based deduplication: SQS hashes the message body automatically
+
+**3. Upsert Pattern (INSERT OR REPLACE)**
+```sql
+-- Redshift / PostgreSQL: idempotent upsert
+INSERT INTO orders (order_id, amount, status)
+VALUES (%(order_id)s, %(amount)s, %(status)s)
+ON CONFLICT (order_id) DO UPDATE SET
+  amount = EXCLUDED.amount,
+  status = EXCLUDED.status;
+```
+
+**4. Idempotency Key in HTTP/API Requests**
+- Pass a client-generated UUID as `Idempotency-Key` header
+- Server stores key + response; returns same response for repeated requests with same key
+- AWS Step Functions `startExecution` supports `name` parameter as idempotency key
+
+### Idempotency Record Cleanup
+
+- Store processed IDs with a TTL (DynamoDB TTL attribute)
+- Set TTL = message retention period of the source queue
+- After TTL, the record is deleted — duplicate protection no longer needed for old messages
+
+---
+
+## Circuit Breaker Pattern
+
+Prevents cascading failures by stopping calls to a consistently failing downstream service.
+
+### States
+
+```
+CLOSED → (failures < threshold) → normal operation, all calls pass through
+   ↓ (failures exceed threshold)
+OPEN → (all calls fail immediately, no downstream calls) → wait cooldown period
+   ↓ (after cooldown)
+HALF-OPEN → (allow one test call through)
+   ↓ success              ↓ failure
+CLOSED (reset)         OPEN (back to waiting)
+```
+
+### Implementation with DynamoDB
+
+```python
+# DynamoDB item tracks circuit state per service
+{
+  "service_name": "payment-api",
+  "state": "OPEN",           # CLOSED, OPEN, HALF-OPEN
+  "failure_count": 7,
+  "last_failure_time": 1712000000,
+  "cooldown_seconds": 60
+}
+
+def call_with_circuit_breaker(service_name, call_fn):
+    state = get_circuit_state(service_name)  # read from DynamoDB
+    if state == "OPEN":
+        if time.time() - state.last_failure_time > state.cooldown_seconds:
+            set_state(service_name, "HALF-OPEN")
+        else:
+            raise CircuitOpenException("Service unavailable")
+    try:
+        result = call_fn()
+        reset_circuit(service_name)  # success → CLOSED
+        return result
+    except Exception as e:
+        increment_failure(service_name)  # failure → OPEN if threshold exceeded
+        raise
+```
+
+> **Exam tip:** Circuit breaker = DynamoDB state store + Lambda logic. Prevents a slow downstream system from causing Lambda timeouts and exhausting concurrency across the whole account.
+
+---
+
+## AWS X-Ray (Distributed Tracing)
+
+Track requests as they flow across Lambda, API Gateway, SQS, DynamoDB, and other services.
+
+### Key Concepts
+
+| Concept | Description |
+|---------|-------------|
+| **Trace** | End-to-end record of a single request across all services |
+| **Segment** | One service's contribution to a trace (e.g., Lambda execution) |
+| **Subsegment** | Sub-operation within a segment (e.g., DynamoDB call inside Lambda) |
+| **Annotation** | Indexed key-value pair — use for filtering traces (e.g., `customer_id`) |
+| **Metadata** | Non-indexed data attached to a segment (for debugging, not filtering) |
+| **Sampling** | X-Ray samples a percentage of requests — not all traces are recorded by default |
+
+### Enable X-Ray on Lambda
+
+```python
+# Install: pip install aws-xray-sdk
+from aws_xray_sdk.core import xray_recorder, patch_all
+patch_all()  # auto-instruments boto3, requests, etc.
+
+@xray_recorder.capture('process_order')
+def handler(event, context):
+    with xray_recorder.in_subsegment('validate'):
+        validate_order(event)
+    with xray_recorder.in_subsegment('write_to_dynamodb'):
+        write_order(event)
+```
+
+### X-Ray Service Map
+
+- Visual map of all services involved in a request flow
+- Shows latency, error rate, and fault rate per node
+- Helps identify bottlenecks: which service is slow or throwing errors?
+
+### Correlation IDs
+
+Pass a unique `correlation_id` through all services in a pipeline for end-to-end traceability:
+
+```python
+# Lambda receives event with correlation_id
+correlation_id = event.get('correlation_id', str(uuid.uuid4()))
+
+# Add to X-Ray annotation for filtering
+xray_recorder.put_annotation('correlation_id', correlation_id)
+
+# Pass downstream (SQS message, Step Functions input, etc.)
+sqs.send_message(
+    QueueUrl=queue_url,
+    MessageBody=json.dumps({**payload, 'correlation_id': correlation_id})
+)
+```
+
+---
+
+## Service-Specific Error Reference
+
+### Lambda
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `Lambda.TooManyRequestsException` | Concurrency limit hit | Increase reserved concurrency or use SQS buffer |
+| `Lambda.ServiceException` | Lambda infrastructure issue | Retry with backoff (transient) |
+| `Lambda.AWSLambdaException` | Function execution error | Fix function code |
+| `Lambda.SdkClientException` | SDK/network issue | Retry with backoff |
+| `Task timed out` | Function exceeded timeout setting | Optimize code or increase timeout |
+
+### Glue
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `OUT_OF_MEMORY` | Job needs more memory | Upgrade to G.2X workers |
+| `TIMEOUT` | Job ran longer than timeout | Increase `--timeout` parameter |
+| `RESOURCE_NOT_FOUND` | Table/database missing in catalog | Run crawler first or check table name |
+| Job stuck in RUNNING | DPU not releasing | Check for infinite loops; set job timeout |
+
+### Kinesis
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `ProvisionedThroughputExceededException` | Shard limit hit | Reshard or switch to On-Demand |
+| `ExpiredIteratorException` | Iterator not used within 5 minutes | Get a new shard iterator |
+| `ResourceNotFoundException` | Stream doesn't exist | Check stream name and region |
+
+### Athena
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `QUERY_QUEUE_TIMEOUT` | Workgroup concurrency limit | Reduce concurrent queries or increase limit |
+| `HIVE_EXCEEDED_PARTITION_LIMIT` | Too many partitions (> 20K default) | Use partition projection |
+| `S3 Access Denied` | IAM/bucket policy issue | Grant `s3:GetObject` on data prefix |
+| `SYNTAX_ERROR` | Invalid SQL | Check engine version (v2 vs v3 differences) |
 
 ---
 
@@ -237,7 +421,15 @@ For FIFO queues, failed messages block the queue (messages are processed in orde
 
 - **DLQ** = answer for "handle failed messages without blocking the pipeline"
 - **Exponential backoff** = answer for "handle throttling"
-- Step Functions has built-in Retry/Catch - no custom code needed
-- "Orchestration within code is an anti-pattern" - use Step Functions
-- Lambda DLQ captures failed async invocations only (not sync)
-- SQS visibility timeout must be longer than Lambda processing time
+- **Step Functions Retry/Catch** = built-in, no custom retry code needed
+- **"Orchestration within code is an anti-pattern"** → use Step Functions
+- **Lambda DLQ captures failed async invocations only** — not synchronous invocations
+- **SQS visibility timeout must be >= Lambda timeout** — or messages get processed twice
+- **`bisectBatchOnFunctionError`** = isolates the bad record in a Kinesis/DynamoDB Streams batch in O(log n) retries
+- **`maximumRecordAgeInSeconds`** = the escape valve for poison-pill records blocking a Kinesis shard forever
+- **`ResultPath: "$.error"` in Catch** — always use this to preserve original input alongside the error; `"$"` overwrites input (wrong)
+- **`JitterStrategy: "FULL"`** — prevents thundering herd after an outage when all retrying tasks fire at the same instant
+- **Idempotency** — SQS standard queues are at-least-once; always design Lambda consumers to be idempotent
+- **SQS FIFO deduplication window = 5 minutes** — duplicate messages within 5 min are silently dropped
+- **X-Ray** = distributed tracing across services; annotation = indexed (filterable), metadata = non-indexed (debugging only)
+- **Circuit breaker** = use DynamoDB to track state (CLOSED/OPEN/HALF-OPEN); prevents cascading failures from slow downstream services

@@ -136,11 +136,58 @@ QUARANTINE + CloudWatch Alarm + SNS Notification:
 
 ## AWS Glue DataBrew
 
-- No-code visual data preparation
-- 250+ built-in transformations
-- Data profiling: statistics, distributions, missing values
-- Define data quality rules visually
-- Good for analysts who don't write code
+Visual, no-code data preparation service — distinct from Glue Data Quality.
+
+### DataBrew Concepts
+
+| Concept | Description |
+|---------|-------------|
+| **Project** | Interactive workspace — connect to a dataset, explore, apply transformations |
+| **Dataset** | Pointer to data source (S3, Glue Catalog, Redshift, RDS, etc.) |
+| **Recipe** | Ordered list of transformation steps (rename, filter, split, format, derive) |
+| **Job** | Runs a recipe against a dataset at scale — writes output to S3 |
+| **Profile Job** | Scans the dataset and generates statistics (nulls, distributions, correlations) |
+| **Ruleset** | Quality rules applied during a profile job |
+
+### Data Profiling
+
+Run a **Profile Job** to get:
+- Column-level statistics: null %, distinct values, min/max/mean, standard deviation
+- Value distribution histograms
+- Duplicate row detection
+- Correlation between columns
+- Sample data preview
+
+Profile results are stored in S3 (JSON) and shown in the DataBrew console.
+
+### DataBrew Quality Rules
+
+Rules can be defined **from the profile** (DataBrew suggests rules based on observed data) or manually:
+
+```
+Rule: "Column 'age' values between 0 and 120"
+Rule: "Column 'email' matches pattern .*@.*\..*"
+Rule: "Column 'customer_id' has no missing values"
+Rule: "Row count >= 10000"
+Rule: "Column 'status' is one of: ACTIVE, INACTIVE, PENDING"
+```
+
+- Rules evaluated during Profile Jobs — not during recipe/transform jobs
+- Results: PASS/FAIL per rule with a score
+- Can trigger notifications on failure via CloudWatch + SNS
+
+### DataBrew vs Glue Data Quality
+
+| Feature | Glue DataBrew | Glue Data Quality (DQDL) |
+|---------|--------------|--------------------------|
+| **Interface** | Visual (no-code) | Code/config (DQDL rules) |
+| **Target user** | Analysts, data stewards | Data engineers |
+| **Profiling** | Built-in rich profiling | Not built-in (use separately) |
+| **Transform** | 250+ built-in transforms | Not for transforms |
+| **Integration** | Standalone jobs | Embedded in Glue ETL jobs |
+| **Rule complexity** | UI-driven | Full DQDL rule language |
+
+> **Exam tip:** "No-code data preparation" or "analysts building data quality rules visually" = DataBrew. "Programmatic quality checks in ETL pipelines" = Glue Data Quality (DQDL).
 
 ---
 
@@ -204,12 +251,47 @@ Rules = [
 
 ---
 
+## Schema Evolution & Compatibility
+
+Data schemas change over time — pipelines must handle these gracefully.
+
+### Change Types
+
+| Change | Breaking? | Safe to evolve? |
+|--------|----------|----------------|
+| Add nullable column | No | Yes — consumers ignore unknown columns |
+| Add non-nullable column | Yes | No — existing rows fail NOT NULL constraint |
+| Remove column | Yes | No — consumers expecting it will fail |
+| Rename column | Yes | No — treat as remove + add |
+| Change data type (widen) | No | Yes (e.g., INT → BIGINT) |
+| Change data type (narrow) | Yes | No (e.g., BIGINT → INT may truncate) |
+| Add partition column | Yes | Requires MSCK REPAIR or projection update |
+
+### Handling Schema Evolution in Glue
+
+- Enable **Schema Evolution** on Glue ETL jobs: `--enable-update-catalog`
+- Glue can automatically add new columns to the Glue Catalog when detected in the source
+- For Parquet/ORC: use **Merge Schema** option in Spark to read files with different schemas
+- **Glue Schema Registry** (with Kinesis/MSK): validates message schemas, rejects incompatible messages, tracks schema versions
+
+### Schema Drift Detection Pattern
+
+```
+Glue Crawler runs → compares new schema to catalog schema
+                  → if columns added/removed → trigger CloudWatch Event
+                  → Lambda checks if breaking change
+                  → SNS alert to data engineering team
+```
+
+---
+
 ## Data Sampling Techniques
 
 - **Random Sampling:** Uniform random selection of rows
 - **Stratified Sampling:** Sample proportionally from each group/category
 - **Systematic Sampling:** Every Nth record
 - Use for: testing quality rules on large datasets without scanning everything
+- **DQ on sample vs full dataset:** For very large tables, run DQDL rules on a sample first to catch obvious issues cheaply before committing to a full scan
 
 ---
 
@@ -229,6 +311,12 @@ Rules = [
 
 - **"Data quality rules"** = Glue Data Quality with DQDL
 - **"No-code data preparation"** = Glue DataBrew
+- **"Data profiling" / "column statistics"** = DataBrew Profile Job
 - **"Data skew"** = uneven partition sizes, fix with salting or repartition
 - Data quality can be a step in Step Functions workflow (check before proceeding)
-- DataBrew also supports data profiling (statistics about your data)
+- **QUARANTINE** = good records flow forward, bad records go to separate S3 path — most common exam answer for "don't block the pipeline but isolate bad data"
+- **FAIL** = stop everything — use before loading to a data warehouse where bad data is costly to fix
+- **ReferentialIntegrity rule** requires both tables to be in the Glue Catalog
+- **DataBrew rules** are evaluated during Profile Jobs, not transform/recipe jobs
+- **Schema Evolution** in Glue: enable `--enable-update-catalog` so new columns are automatically registered in the catalog
+- If a **DQ rule evaluation itself fails** (e.g., the reference table is missing for ReferentialIntegrity), the Glue job fails — always verify reference tables exist before running referential integrity checks

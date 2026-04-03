@@ -20,6 +20,75 @@ Source -> SQS Queue -> Lambda (fails 3x) -> DLQ -> Manual review or reprocessing
 
 ---
 
+## Lambda Destinations
+
+Lambda Destinations provide **success and failure routing** for async invocations — a superset of what DLQ offers.
+
+### DLQ vs Lambda Destinations
+
+| Feature | DLQ | Lambda Destinations |
+|---|---|---|
+| Triggers on | **Failure only** | **Success OR Failure** (separate targets) |
+| Payload sent | Original event body only | Original event + invocation record + **full response or error** |
+| Destinations | SQS or SNS only | SQS, SNS, EventBridge, another Lambda function |
+| Context | None | Full invocation metadata (request ID, timestamp, status code) |
+| Config location | Lambda function config | Lambda event source mapping / function config |
+
+### Configuration
+
+```python
+import boto3
+lambda_client = boto3.client('lambda')
+
+lambda_client.put_function_event_invoke_config(
+    FunctionName='process-order',
+    MaximumRetryAttempts=2,
+    DestinationConfig={
+        'OnSuccess': {
+            'Destination': 'arn:aws:sqs:us-east-1:123:order-success-queue'
+        },
+        'OnFailure': {
+            'Destination': 'arn:aws:sqs:us-east-1:123:order-failure-queue'
+        }
+    }
+)
+```
+
+### Payload Structure (OnFailure destination)
+
+```json
+{
+  "version": "1.0",
+  "timestamp": "2024-01-15T12:00:00Z",
+  "requestContext": {
+    "requestId": "abc-123",
+    "functionArn": "arn:aws:lambda:...:function:process-order",
+    "condition": "RetriesExhausted",
+    "approximateInvokeCount": 3
+  },
+  "requestPayload": { "order_id": "ORD-456" },   // original event
+  "responseContext": {
+    "statusCode": 200,
+    "executedVersion": "$LATEST",
+    "functionError": "Unhandled"
+  },
+  "responsePayload": { "errorMessage": "Connection timeout" }   // actual error
+}
+```
+
+**Why Destinations are better than DLQ in most cases:**
+- The `responsePayload` field contains the actual error thrown by the function — DLQ only has the original event, making debugging harder
+- You can route successes to one queue and failures to another (DLQ cannot handle success routing)
+- EventBridge as a destination enables complex fan-out routing on failure
+
+**Exam Patterns:**
+- "Route failed async Lambda invocations to SQS with the full error details for debugging" → Lambda Destinations (OnFailure to SQS)
+- "Trigger different workflows on Lambda success vs failure" → Lambda Destinations with OnSuccess and OnFailure configured
+- "Lambda DLQ vs Destinations — which provides more context on failure?" → Destinations (includes error response); DLQ only has the original event
+- "Notify EventBridge when an async Lambda function succeeds" → Lambda Destinations (OnSuccess to EventBridge)
+
+---
+
 ## Retry Strategies
 
 ### Exponential Backoff
@@ -433,3 +502,4 @@ sqs.send_message(
 - **SQS FIFO deduplication window = 5 minutes** — duplicate messages within 5 min are silently dropped
 - **X-Ray** = distributed tracing across services; annotation = indexed (filterable), metadata = non-indexed (debugging only)
 - **Circuit breaker** = use DynamoDB to track state (CLOSED/OPEN/HALF-OPEN); prevents cascading failures from slow downstream services
+- **Lambda Destinations vs DLQ:** Destinations are more capable — they fire on success OR failure, include the full response payload (not just the original event), and can target EventBridge. Use DLQ for SQS/SNS-only failure routing when you don't need the error response body. Use Destinations when you need the error detail or success routing.

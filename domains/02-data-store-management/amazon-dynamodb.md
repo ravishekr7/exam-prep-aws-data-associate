@@ -107,7 +107,8 @@ If GSI runs out of WCU, **base table writes are throttled** too. Always provisio
 - **Microsecond** latency (vs millisecond for DynamoDB)
 - Transparent to application (same API, no code changes)
 - **Read cache** — writes pass through DAX to DynamoDB directly, but DAX provides zero write latency benefit. Do not use DAX to solve write performance problems.
-- Use for read-heavy, latency-sensitive workloads
+- **Eventually consistent reads only** — DAX cannot serve strongly consistent reads. If your application requires strongly consistent reads, bypass DAX and read from DynamoDB directly (pass `ConsistentRead=True` in the DynamoDB call, not the DAX endpoint).
+- Use for read-heavy, latency-sensitive workloads with eventual consistency requirements
 
 ---
 
@@ -184,6 +185,24 @@ Common patterns for idempotency:
 - No WCU cost for TTL deletions
 - Deletions appear in DynamoDB Streams
 - Use for: session data, temporary records, log expiration
+
+---
+
+## DynamoDB Table Classes
+
+| Class | Storage Cost | Read/Write Cost | Best For |
+|---|---|---|---|
+| **Standard** (default) | Standard | Standard | Frequently accessed tables |
+| **Standard-IA** | ~60% lower | ~25% higher per request | Tables rarely read after initial ingestion |
+
+- Switching table class has **no effect on performance, latency, or availability** — only cost
+- Standard-IA is suitable when the ratio of storage cost to access cost is high (lots of data, few reads)
+- Common use cases for Standard-IA: audit logs, historical records, archival tables, compliance data
+- Standard-IA cannot be used with **DynamoDB Global Tables** (requires Standard class)
+
+**Exam Patterns:**
+- "Reduce DynamoDB costs for a table containing 3 years of historical data that is rarely queried" → Switch to Standard-IA table class
+- "DynamoDB table class change — impact on query latency?" → None. Table class only affects storage and request pricing.
 
 ---
 
@@ -401,3 +420,5 @@ print(f"Total items scanned: {len(results)}")
 - **TransactWriteItems is all-or-nothing across up to 100 items and multiple tables.** Cost is 2× normal WCU. Use when two or more writes must either all succeed or all fail together.
 - **Parallel Scan consumes RCUs — DynamoDB Export to S3 does not.** This is the key decision: if cost matters and you need the full table, use Export to S3. Use Parallel Scan only when you need real-time programmatic access to the data and cannot use the Export approach.
 - **Parallel Scan segments must be processed by separate workers.** A single-threaded application scanning TotalSegments=10 with Segment=0 only scans 1/10 of the table. You need 10 separate threads/processes/Lambda invocations to get the parallelism benefit.
+- **DynamoDB Table Classes: Standard-IA reduces storage cost ~60% but increases per-request cost ~25%.** Use for tables that are written once and rarely read (audit logs, historical archives). Switching table class has zero effect on performance or latency. Standard-IA cannot be used with Global Tables.
+- **DAX serves only eventually consistent reads.** If strongly consistent reads are required, the application must query DynamoDB directly (not via DAX endpoint). DAX is purely a read cache for eventually consistent workloads.

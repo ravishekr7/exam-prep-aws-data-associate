@@ -40,6 +40,50 @@ Query data in **RDS** or **Aurora** directly from Redshift without ETL.
 
 ---
 
+## Redshift Streaming Ingestion
+
+Direct ingestion from **Kinesis Data Streams** or **Amazon MSK (Kafka)** into Redshift via a materialized view — without Firehose, S3, or a COPY command.
+
+**How It Works:**
+1. Create an external schema in Redshift pointing to the Kinesis stream or MSK topic
+2. Create a materialized view that selects from the external schema (the stream)
+3. Refresh the materialized view to pull new records into Redshift
+
+```sql
+-- Step 1: Create external schema for a Kinesis stream
+CREATE EXTERNAL SCHEMA kinesis_schema
+FROM KINESIS
+IAM_ROLE 'arn:aws:iam::123456789012:role/RedshiftKinesisRole';
+
+-- Step 2: Create materialized view over the stream
+CREATE MATERIALIZED VIEW orders_stream AS
+SELECT approximatearrivaltimestamp,
+       JSON_PARSE(from_varbyte(data, 'utf-8')) AS order_data
+FROM kinesis_schema.order_events_stream;
+
+-- Step 3: Refresh to pull new records
+REFRESH MATERIALIZED VIEW orders_stream;
+-- Can schedule this with Redshift Scheduler or EventBridge
+```
+
+**Why It Matters — Firehose vs Streaming Ingestion:**
+
+| Approach | Latency | Complexity | Best For |
+|---|---|---|---|
+| Firehose → S3 → COPY | 60 seconds minimum (buffer) | Medium | Durable, cost-optimized batch loads |
+| Redshift Streaming Ingestion | Sub-second | Low (no intermediate store) | Near-real-time analytics on fresh data |
+
+**Key Constraints:**
+- Data consumed from the stream is raw bytes — use `JSON_PARSE` or `FROM_VARBYTE` to deserialize
+- Supports Kinesis Data Streams and Amazon MSK; does not support Kinesis Firehose as the source
+- Requires an IAM role with `kinesis:GetRecords`, `kinesis:GetShardIterator`, `kinesis:DescribeStream`
+
+**Exam Patterns:**
+- "Ingest streaming Kinesis data into Redshift with sub-second latency and least operational overhead" → Redshift Streaming Ingestion (not Firehose, which buffers to S3 first)
+- "Real-time dashboards on Redshift need data within seconds of it arriving in Kinesis" → Redshift Streaming Ingestion
+
+---
+
 ## Materialized Views
 
 - Pre-compute complex query results for faster access
@@ -256,6 +300,46 @@ By default, COPY and UNLOAD traffic between Redshift and S3 routes over the publ
 
 ---
 
+## Redshift ML
+
+Create, train, and invoke ML models using standard SQL — without moving data out of Redshift. Under the hood, Redshift exports training data to S3 and calls **Amazon SageMaker AutoPilot** to select and train the best model. Once trained, a prediction function is registered directly in Redshift and callable from SQL.
+
+```sql
+-- Step 1: Train a model (Redshift exports data to S3, SageMaker trains it)
+CREATE MODEL predict_customer_churn
+FROM (
+    SELECT age, total_orders, days_since_last_order, churn
+    FROM customers
+    WHERE split = 'train'
+)
+TARGET churn
+FUNCTION ml_churn_predict
+IAM_ROLE 'arn:aws:iam::123456789012:role/RedshiftMLRole'
+SETTINGS (S3_BUCKET 's3://my-redshift-ml-artifacts/');
+
+-- Step 2: Check model status (training happens asynchronously in SageMaker)
+SHOW MODEL predict_customer_churn;
+
+-- Step 3: Run inference in SQL — no API calls, no Python
+SELECT customer_id,
+       ml_churn_predict(age, total_orders, days_since_last_order) AS churn_probability
+FROM customers
+WHERE split = 'inference';
+```
+
+**Key Facts:**
+- Training is done in SageMaker (outside Redshift) — the IAM role needs permissions for both Redshift and SageMaker
+- `AUTO OFF` option: bring your own SageMaker model ARN instead of using AutoPilot
+- Inference (prediction calls) runs **inside Redshift** — fast, no data leaves the warehouse, no extra cost per call
+- `CREATE MODEL` is asynchronous — the model status goes from `TRAINING` → `READY`
+
+**Exam Patterns:**
+- "Data analysts want to run ML predictions in SQL without learning Python or moving data to SageMaker" → Redshift ML
+- "Train a classification model on existing Redshift data with least operational overhead" → `CREATE MODEL` with AutoPilot
+- **Note:** SQA (Short Query Acceleration) is a WLM feature — it is NOT related to ML or Redshift ML. The exam will offer both as distractors.
+
+---
+
 ## Redshift Serverless
 
 - No cluster management
@@ -384,3 +468,5 @@ This approach minimizes actual production downtime at the cost of more manual st
 - **Redshift Data Sharing ≠ Redshift Spectrum.** Data Sharing is Redshift-to-Redshift live data access. Spectrum queries S3 external tables. They solve different problems — the exam will try to confuse you by offering both as options.
 - **Elastic Resize only changes node count, not node type.** If the scenario requires changing the instance family (e.g., DC2 to RA3), Elastic Resize is not an option — you must use Classic Resize or the snapshot-restore approach.
 - **Consumer cluster in Data Sharing uses its OWN compute** for queries. Sharing data does not impact the producer cluster's query performance — consumers pay for their own query execution.
+- **Redshift Streaming Ingestion ≠ Kinesis Firehose.** Streaming Ingestion is direct (sub-second latency, no S3 buffer). Firehose buffers to S3 first (minimum 60-second delay). Use Streaming Ingestion when the question asks for "sub-second" or "real-time" Redshift ingestion.
+- **Redshift ML uses SageMaker AutoPilot under the hood** — training happens outside Redshift. The IAM role needs both Redshift and SageMaker permissions, plus access to the S3 bucket for artifacts. SQA is NOT related to ML; it is a WLM routing feature for short queries.

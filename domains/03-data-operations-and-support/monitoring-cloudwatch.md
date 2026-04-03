@@ -57,6 +57,62 @@ cloudwatch.put_metric_data(
 - **Dimensions:** Key-value pairs that identify a unique metric stream
 - Custom metrics are retained for 15 months
 
+### CloudWatch Embedded Metric Format (EMF)
+
+EMF allows Lambda (and other services) to emit custom CloudWatch metrics by writing **structured JSON log lines** — without calling `PutMetricData`. CloudWatch automatically extracts the metrics from the log output.
+
+**Why EMF instead of PutMetricData:**
+- `PutMetricData` is a separate API call — adds latency inside the Lambda handler and counts against CloudWatch API quotas
+- EMF piggybacks on the existing log stream — zero additional API calls, zero added latency
+- Works in Lambda, ECS, EC2, and any service that writes to CloudWatch Logs
+
+**EMF log format:**
+
+```python
+import json
+
+def handler(event, context):
+    records_processed = process_batch(event)
+
+    # EMF structured log line — CloudWatch auto-extracts the metric
+    print(json.dumps({
+        "_aws": {
+            "Timestamp": 1705312800000,
+            "CloudWatchMetrics": [{
+                "Namespace": "MyApp/ETL",
+                "Dimensions": [["JobName"]],
+                "Metrics": [
+                    {"Name": "RecordsProcessed", "Unit": "Count"},
+                    {"Name": "ProcessingDurationMs", "Unit": "Milliseconds"}
+                ]
+            }]
+        },
+        "JobName": "daily-ingestion",           # dimension value
+        "RecordsProcessed": records_processed,  # metric value
+        "ProcessingDurationMs": 1234            # metric value
+    }))
+```
+
+- CloudWatch Logs detects the `_aws.CloudWatchMetrics` key and automatically creates the metrics
+- The same log line also appears as a normal log event — no data lost
+- Use the **`aws-embedded-metrics` library** (Python/Node.js) for a cleaner API:
+
+```python
+from aws_embedded_metrics import metric_scope
+
+@metric_scope
+def handler(event, context, metrics):
+    metrics.set_namespace("MyApp/ETL")
+    metrics.put_dimensions({"JobName": "daily-ingestion"})
+    metrics.put_metric("RecordsProcessed", 15000, "Count")
+    metrics.put_metric("ProcessingDurationMs", 1234, "Milliseconds")
+```
+
+**Exam Patterns:**
+- "Emit custom business metrics from Lambda without adding API call latency or hitting PutMetricData quotas" → CloudWatch EMF
+- "Lambda function needs to publish high-frequency metrics cheaply without extra AWS API calls" → EMF (metrics emitted via logs, not PutMetricData)
+- "Which approach adds the least overhead when emitting metrics from a high-concurrency Lambda?" → EMF over PutMetricData
+
 ### Metric Math
 
 Combine metrics using mathematical expressions:
@@ -357,3 +413,4 @@ Lambda processes order → PutMetricData("Orders/Completed", 1)
 - **High-resolution metrics** (1-second) are for custom metrics only — not all AWS services publish at 1s
 - **Metric Math** can compute derived metrics (error rate, utilization %) without custom PutMetricData calls
 - CloudWatch **does not monitor on-premises** resources by default — requires CloudWatch agent
+- **EMF (Embedded Metric Format) vs PutMetricData:** EMF emits metrics via structured log lines — zero extra API calls, zero added latency inside the function. Use EMF for high-frequency or high-concurrency Lambda functions where PutMetricData API overhead is a concern.

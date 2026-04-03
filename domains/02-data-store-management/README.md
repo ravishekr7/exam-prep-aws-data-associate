@@ -7,12 +7,13 @@ Covers choosing the right data store, designing data models, cataloging schemas,
 ### Task 2.1: Choose a Data Store
 - Implement storage services for specific cost and performance requirements (Redshift, EMR, Lake Formation, RDS, DynamoDB, Kinesis, MSK)
 - Configure storage for specific access patterns
-- Apply storage to appropriate use cases (vector indexing with HNSW, MemoryDB for fast key/value)
-- Integrate migration tools (Transfer Family)
-- Implement data migration or remote access (Redshift federated queries, materialized views, Spectrum)
+- Apply storage to appropriate use cases (vector indexing with HNSW, MemoryDB for fast key/value, DynamoDB Standard-IA for infrequent access)
+- Integrate migration tools (Transfer Family — SFTP/FTPS/FTP/AS2 endpoints backed by S3)
+- Implement data migration or remote access (Redshift federated queries, materialized views, Spectrum, Redshift Streaming Ingestion from Kinesis/MSK)
 - Manage locks to prevent access (Redshift, RDS)
-- Manage open table formats (Apache Iceberg)
+- Manage open table formats (Apache Iceberg, Hudi, Delta Lake)
 - Describe vector index types (HNSW, IVF)
+- Aurora I/O-Optimized for high-throughput OLTP cost optimization
 
 ### Task 2.2: Understand Data Cataloging Systems
 - Use data catalogs to consume data from source
@@ -24,18 +25,23 @@ Covers choosing the right data store, designing data models, cataloging schemas,
 
 ### Task 2.3: Manage the Lifecycle of Data
 - Load/unload operations between S3 and Redshift
-- Manage S3 Lifecycle policies (storage tier transitions, expiration)
+- Manage S3 Lifecycle policies (storage tier transitions, expiration, non-current version expiration)
 - Manage S3 versioning and DynamoDB TTL
-- Delete data for business and legal requirements
+- Delete data for business and legal requirements (S3 Object Lock, Iceberg row-level deletes)
 - Protect data with appropriate resiliency and availability
+- S3 Inventory for compliance auditing of object metadata at scale
+- S3 Batch Operations for bulk object management (tagging, restore, copy, re-encrypt)
+- S3 Storage Lens for organization-wide storage visibility and cost waste identification
 
 ### Task 2.4: Design Data Models and Schema Evolution
 - Design schemas for Redshift, DynamoDB, Lake Formation
-- Address changes to data characteristics
+- Address changes to data characteristics (SCD Types 1/2/3, Iceberg schema evolution)
 - Perform schema conversion (SCT, DMS Schema Conversion)
 - Establish data lineage (SageMaker ML Lineage Tracking, SageMaker Catalog)
-- Best practices for indexing, partitioning, compression
-- Vectorization concepts (Bedrock knowledge base)
+- Best practices for indexing, partitioning, compression (compound sort keys — interleaved deprecated)
+- Vectorization concepts (Bedrock knowledge base, Aurora pgvector, HNSW vs IVF)
+- Glue Schema Registry compatibility modes (BACKWARD, FORWARD, FULL)
+- Redshift ML (CREATE MODEL — SQL-based ML with SageMaker AutoPilot under the hood)
 
 ## Study Files
 

@@ -129,6 +129,65 @@ InputPath  →  Parameters  →  Task execution  →  ResultSelector  →  Resul
 - Runs the `Iterator` state machine once per item in the array
 - `MaxConcurrency`: Limits parallel iterations (0 = unlimited)
 - Results collected into an array and passed to the next state
+- **Scale limit:** Input array must fit in the state input (max 256 KB) — not suitable for millions of items
+
+### Distributed Map (Large-Scale Parallel Processing)
+
+A separate Map mode that processes data **directly from S3 or other sources** at massive scale — up to **10,000 concurrent child workflow executions**.
+
+**Key differences from regular Map:**
+
+| Feature | Map State | Distributed Map |
+|---|---|---|
+| Input source | In-memory array (state input) | S3 objects, S3 inventory, JSON/CSV in S3 |
+| Scale | ~hundreds of items max (256 KB limit) | Up to 10 million items |
+| Child execution type | Inline (same execution) | Separate Express Workflow executions |
+| Results | Returned inline to parent | Written to S3 |
+| Use case | Small array fan-out | Massive file/record processing |
+
+**Common sources:**
+- `S3ObjectsItemReader` — each S3 object in a prefix becomes one item
+- `S3JsonItemReader` — each line of a JSON array in S3 becomes one item
+- `S3CsvItemReader` — each CSV row becomes one item
+
+```json
+{
+  "Type": "Map",
+  "ItemProcessor": {
+    "ProcessorConfig": {
+      "Mode": "DISTRIBUTED",
+      "ExecutionType": "EXPRESS"
+    },
+    "StartAt": "ProcessRecord",
+    "States": { ... }
+  },
+  "ItemReader": {
+    "Resource": "arn:aws:states:::s3:getObject",
+    "ReaderConfig": {
+      "InputType": "CSV",
+      "CSVHeaderLocation": "FIRST_ROW"
+    },
+    "Parameters": {
+      "Bucket": "my-data-bucket",
+      "Key": "data/records.csv"
+    }
+  },
+  "MaxConcurrency": 1000,
+  "ResultWriter": {
+    "Resource": "arn:aws:states:::s3:putObject",
+    "Parameters": {
+      "Bucket": "my-results-bucket",
+      "Prefix": "results/"
+    }
+  }
+}
+```
+
+**Exam Patterns:**
+- "Process 50 million records from an S3 CSV file in parallel using Step Functions" → Distributed Map
+- "Fan out Step Functions to process each S3 object in a bucket independently" → Distributed Map with `S3ObjectsItemReader`
+- "Regular Map state fails because the input array is too large" → Switch to Distributed Map (reads from S3, no 256 KB limit)
+- "Run a Step Functions workflow at massive scale cheaply" → Distributed Map with Express Workflow child executions
 
 ### Pricing
 
@@ -321,3 +380,4 @@ Custom App Event → Custom Event Bus → Multiple targets (fan-out)
 - **Archive/Replay** — EventBridge can replay past events after a bug fix
 - **Cross-account events** — use custom event bus with resource policy
 - `ResultPath: null` in Step Functions = discard task result, pass original input unchanged
+- **Distributed Map ≠ regular Map state.** Regular Map processes an in-memory array (limited by 256 KB state input). Distributed Map reads directly from S3 and launches up to 10,000 concurrent Express Workflow executions — use for millions of records or objects.

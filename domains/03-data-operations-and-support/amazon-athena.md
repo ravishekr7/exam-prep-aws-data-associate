@@ -247,6 +247,82 @@ spark.conf.set("spark.executor.memory", "4g")
 
 ---
 
+## Athena with Apache Iceberg
+
+Athena has native support for Apache Iceberg tables — enabling ACID DML (INSERT, UPDATE, DELETE, MERGE), time travel, and schema evolution directly in SQL without Spark or EMR.
+
+### Create an Iceberg Table in Athena
+
+```sql
+CREATE TABLE my_catalog.orders (
+    order_id   BIGINT,
+    customer_id INT,
+    amount     DECIMAL(10,2),
+    status     VARCHAR(20),
+    order_date DATE
+)
+LOCATION 's3://my-bucket/iceberg/orders/'
+TBLPROPERTIES ('table_type'='ICEBERG', 'format'='parquet');
+```
+
+### DML Operations
+
+```sql
+-- INSERT new rows
+INSERT INTO orders VALUES (1001, 42, 99.99, 'PENDING', DATE '2024-01-15');
+
+-- UPDATE specific rows (not possible on plain Parquet!)
+UPDATE orders SET status = 'SHIPPED' WHERE order_id = 1001;
+
+-- DELETE specific rows (GDPR right-to-erasure)
+DELETE FROM orders WHERE customer_id = 42;
+
+-- MERGE INTO (upsert — combine INSERT + UPDATE in one statement)
+MERGE INTO orders t
+USING staging_orders s ON t.order_id = s.order_id
+WHEN MATCHED THEN
+    UPDATE SET status = s.status, amount = s.amount
+WHEN NOT MATCHED THEN
+    INSERT (order_id, customer_id, amount, status, order_date)
+    VALUES (s.order_id, s.customer_id, s.amount, s.status, s.order_date);
+```
+
+### Time Travel Queries
+
+```sql
+-- Query table as of a specific timestamp
+SELECT * FROM orders
+FOR TIMESTAMP AS OF TIMESTAMP '2024-01-01 00:00:00 UTC';
+
+-- Query table as of a specific snapshot ID
+SELECT * FROM orders
+FOR VERSION AS OF 5432198765432198765;
+```
+
+### Maintenance Operations (Athena SQL)
+
+```sql
+-- OPTIMIZE: compact small files into larger ones (solves small files problem)
+OPTIMIZE orders REWRITE DATA USING BIN_PACK;
+
+-- VACUUM: remove old snapshot files that are no longer needed (free up S3 space)
+VACUUM orders;
+```
+
+**Key facts:**
+- `OPTIMIZE` compacts small Parquet files — run periodically after many small writes (streaming ingestion)
+- `VACUUM` removes unreferenced snapshot files — run after OPTIMIZE or after large deletes
+- Both commands run directly in Athena SQL — no Spark cluster needed
+
+### Exam Patterns
+- "Apply GDPR right-to-erasure (delete specific rows) on a data lake using Athena SQL" → Iceberg `DELETE FROM`
+- "Upsert CDC records from DMS into a data lake table using Athena" → Iceberg `MERGE INTO`
+- "Compact small files in an Iceberg table without Spark" → Athena `OPTIMIZE ... REWRITE DATA`
+- "Query the state of a data lake table from 30 days ago" → Iceberg time travel `FOR TIMESTAMP AS OF`
+- "Athena vs Glue for Iceberg row-level deletes — which requires less infrastructure?" → Athena (serverless SQL, no Spark cluster needed)
+
+---
+
 ## Performance Tuning
 
 ### Data Layout Best Practices
@@ -338,6 +414,8 @@ Athena Workgroup (per team):
 - **CTAS** = one-time format conversion or pre-materialized aggregations
 - **UNLOAD** = write query results to S3 without creating a catalog table
 - Athena is NOT ideal for complex multi-join OLAP workloads at scale (use Redshift)
-- Athena **cannot update or delete rows** in S3 — use CTAS to overwrite or Iceberg tables for DML
+- Athena **cannot update or delete rows in plain S3 Parquet** — use CTAS to overwrite or create an Iceberg table for row-level DML
+- **Athena Iceberg DML (UPDATE, DELETE, MERGE INTO)** works natively in SQL — no Spark or EMR needed
+- **`OPTIMIZE ... REWRITE DATA`** compacts small Iceberg files; **`VACUUM`** removes old snapshots — both are Athena SQL commands
 - Federated Query data passes through Lambda — not for bulk external reads
 - Cancelled queries are **charged for data already scanned**

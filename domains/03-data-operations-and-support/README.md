@@ -13,9 +13,10 @@ Covers automating data processing, analyzing data, maintaining/monitoring pipeli
 - Process data (EMR, Redshift, Glue)
 - Consume and maintain data APIs
 - Prepare data for transformation (Glue DataBrew, SageMaker Unified Studio)
-- Query data (Athena)
-- Automate with Lambda
+- Query data (Athena, including Iceberg DML via Athena SQL)
+- Automate with Lambda (Lambda Destinations for async success/failure routing)
 - Manage events and schedulers (EventBridge, EventBridge Scheduler)
+- Large-scale parallel processing (Step Functions Distributed Map — up to 10M items from S3)
 
 ### Task 3.2: Analyze Data
 - Visualize data (DataBrew, QuickSight)
@@ -28,11 +29,12 @@ Covers automating data processing, analyzing data, maintaining/monitoring pipeli
 
 ### Task 3.3: Maintain and Monitor Pipelines
 - Extract logs for audits (CloudTrail, CloudWatch Logs)
-- Deploy logging and monitoring solutions (CloudWatch Metrics, Alarms, Subscription Filters)
+- Deploy logging and monitoring solutions (CloudWatch Metrics, Alarms, Subscription Filters, EMF)
 - Use notifications for alerts (SNS, CloudWatch Alarms, Composite Alarms)
 - Troubleshoot performance issues (Glue, EMR, Redshift, Kinesis, Lambda)
 - CloudTrail for API tracking (Management Events, Data Events, Insights, Lake)
 - CloudWatch Logs configuration (retention, encryption, metric filters)
+- Emit metrics without PutMetricData API overhead (CloudWatch EMF via structured logs)
 - Analyze logs (Athena, CloudWatch Logs Insights, CloudTrail Lake)
 - Distributed tracing with X-Ray
 
@@ -50,15 +52,15 @@ Covers automating data processing, analyzing data, maintaining/monitoring pipeli
 
 | Topic | File | Key Concepts Added |
 |-------|------|--------------------|
-| Orchestration | [orchestration.md](./orchestration.md) | Step Functions state types, `.sync:2` / `.waitForTaskToken` patterns, input/output path processing, MWAA operators, EventBridge Archive/Replay, Pipes |
-| CloudWatch Monitoring | [monitoring-cloudwatch.md](./monitoring-cloudwatch.md) | Subscription filters, custom metrics (PutMetricData), Metric Math, Anomaly Detection, Logs Insights queries, TreatMissingData, CloudWatch Synthetics |
+| Orchestration | [orchestration.md](./orchestration.md) | Step Functions state types, `.sync:2` / `.waitForTaskToken` patterns, Distributed Map (10M items from S3), input/output path processing, MWAA operators, EventBridge Archive/Replay, Pipes |
+| CloudWatch Monitoring | [monitoring-cloudwatch.md](./monitoring-cloudwatch.md) | Subscription filters, custom metrics (PutMetricData), EMF (Embedded Metric Format), Metric Math, Anomaly Detection, Logs Insights queries, TreatMissingData, CloudWatch Synthetics |
 | CloudTrail Auditing | [aws-cloudtrail.md](./aws-cloudtrail.md) | Organization trails, CloudTrail Lake SQL queries, Athena on CloudTrail, log integrity validation, KMS encryption, SCP protection |
-| Amazon Athena | [amazon-athena.md](./amazon-athena.md) | Engine v3 vs v2, workgroups (byte limits), partition projection types, result reuse, prepared statements, CTAS/UNLOAD, federated query |
+| Amazon Athena | [amazon-athena.md](./amazon-athena.md) | Engine v3 vs v2, workgroups (byte limits), partition projection types, result reuse, prepared statements, CTAS/UNLOAD, federated query, Iceberg DML (MERGE INTO, UPDATE, DELETE, OPTIMIZE, VACUUM) |
 | Amazon QuickSight | [amazon-quicksight.md](./amazon-quicksight.md) | SPICE vs Direct Query, RLS / tag-based RLS, column-level security, ML insights, QuickSight Q, embedding (signed URLs), Author vs Reader pricing |
 | Data Quality | [data-quality.md](./data-quality.md) | DQDL deep dive, QUARANTINE/FAIL/LOG actions, DataBrew (projects, recipes, profile jobs), schema evolution, referential integrity patterns |
-| Error Handling | [error-handling.md](./error-handling.md) | Step Functions Retry/Catch syntax, Kinesis bisectBatch, SQS DLQ patterns, idempotency implementations, circuit breaker, X-Ray tracing, error code reference |
+| Error Handling | [error-handling.md](./error-handling.md) | Step Functions Retry/Catch syntax, Lambda Destinations (vs DLQ), Kinesis bisectBatch, SQS DLQ patterns, idempotency implementations, circuit breaker, X-Ray tracing, error code reference |
 | Cost Optimization | [cost-optimization.md](./cost-optimization.md) | Compute Optimizer, RI vs Savings Plans, S3 storage classes, NAT Gateway vs VPC endpoints, unit economics, Cost Anomaly Detection, Athena vs Redshift vs EMR TCO |
-| Performance Tuning | [performance-tuning.md](./performance-tuning.md) | AQE (Adaptive Query Execution), Glue worker types + job bookmarks, EMR Instance Fleets + Managed Scaling, Redshift EXPLAIN + WLM, Lambda cold starts + connection pooling |
+| Performance Tuning | [performance-tuning.md](./performance-tuning.md) | AQE (Adaptive Query Execution), Glue worker types + job bookmarks, EMR Instance Fleets + Managed Scaling, Redshift EXPLAIN + WLM (interleaved sort key deprecated), Lambda cold starts + connection pooling |
 
 ---
 
@@ -113,3 +115,8 @@ Covers automating data processing, analyzing data, maintaining/monitoring pipeli
 | "Detect unexpected cost spikes" | AWS Cost Anomaly Detection |
 | "Optimize Athena cost" | Parquet + partitioning + result reuse |
 | "Step Functions high-volume short executions" | Express Workflows |
+| "Process millions of S3 records in parallel with Step Functions" | Distributed Map (Express child workflows) |
+| "Route Lambda async success AND failure to different queues" | Lambda Destinations |
+| "Emit metrics from Lambda without extra API calls" | CloudWatch EMF |
+| "Delete/update specific rows in a data lake using SQL" | Athena + Iceberg (MERGE INTO / DELETE) |
+| "Compact small files in Iceberg table without Spark" | Athena `OPTIMIZE ... REWRITE DATA` |

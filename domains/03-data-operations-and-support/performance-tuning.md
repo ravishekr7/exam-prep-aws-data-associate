@@ -208,8 +208,8 @@ job.commit()  # advances the bookmark
 
 ### Sort Keys
 
-- **Compound sort key:** Most beneficial for queries filtering on leading columns in order
-- **Interleaved sort key:** Equal weight to all columns (better for ad-hoc multi-column filters, worse for VACUUM performance)
+- **Compound sort key:** Most beneficial for queries filtering on leading columns in order. Use this for all new tables.
+- **Interleaved sort key:** ~~Equal weight to all columns~~ — **Deprecated by AWS.** Do not create new tables with interleaved sort keys. `VACUUM REINDEX` (required to maintain their effectiveness) is prohibitively slow on large tables. For multi-column filter patterns, use compound sort key on the most commonly filtered column.
 - Zone map pruning: Redshift skips 1 MB blocks where values are outside filter range
 
 ### Query Plan Analysis (EXPLAIN)

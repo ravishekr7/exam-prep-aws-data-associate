@@ -40,6 +40,15 @@ Contrast with RDS Multi-AZ: RDS keeps a passive standby with synchronous block-l
 - Good for variable/unpredictable workloads
 - Minimum capacity is 0.5 ACU (cannot scale to zero — that is an Aurora Serverless v1 feature)
 
+### Aurora I/O-Optimized
+- Storage configuration for **I/O-intensive OLTP workloads** where per-I/O charges dominate the bill
+- Eliminates per-I/O request charges — I/O is bundled into instance and storage pricing (~25% higher)
+- **Break-even:** When I/O charges exceed ~25% of total Aurora costs, I/O-Optimized is cheaper overall
+- Available for both Aurora MySQL and Aurora PostgreSQL
+- Switching between Standard and I/O-Optimized requires no downtime
+
+**Exam pattern:** "Aurora costs are high due to I/O — how to reduce?" → Switch to Aurora I/O-Optimized cluster configuration (not Standard Aurora with more read replicas).
+
 ### Aurora Backtrack
 - Rewinds an Aurora cluster to a prior point in time **without restoring from backup**
 - In-place rewind — no new cluster, no data copy, no waiting for snapshot restore
@@ -262,3 +271,4 @@ Every database event generates a stream record:
 - **Database Activity Streams ≠ CloudTrail.** CloudTrail captures AWS API calls (control plane). Database Activity Streams capture SQL-level database activity (data plane). A compliance requirement to audit "which queries accessed sensitive data" requires Database Activity Streams — CloudTrail cannot provide this.
 - **Database Activity Streams async mode can lose records on a crash.** For zero-gap compliance auditing, use Synchronous mode — the slight performance cost is the trade-off.
 - **Read Replicas ≠ Multi-AZ.** Read Replicas = horizontal read scaling (async replication, manual failover). Multi-AZ = high availability (sync replication, automatic failover). The exam gives both as options — pick based on whether the requirement is "scale reads" or "survive instance failure."
+- **Aurora I/O-Optimized is for cost reduction on I/O-heavy workloads**, not for performance improvement. The instance performs the same — it just bundles I/O into a flat rate. Break-even is when I/O charges exceed ~25% of total Aurora bill.

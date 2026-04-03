@@ -1,6 +1,6 @@
 # DEA-C01 Practice Questions
 
-25 scenario-based questions covering all 4 exam domains. Each question mirrors the style and difficulty of actual DEA-C01 exam questions — testing judgment and trade-offs, not memorization.
+31 scenario-based questions covering all 4 exam domains. Each question mirrors the style and difficulty of actual DEA-C01 exam questions — testing judgment and trade-offs, not memorization.
 
 ---
 
@@ -181,6 +181,120 @@ A marketing operations team needs to sync customer records from Salesforce CRM i
 **✅ Correct Answer: B**
 
 **Explanation:** Amazon AppFlow is the purpose-built no-code/low-code service for SaaS integrations. It has native Salesforce connectors, supports hourly scheduling, and can output to S3 in Parquet format directly — with zero code. **A** DMS does not support Salesforce as a source (it's for databases). **C** Glue requires writing a custom connector — that's coding, which the team explicitly cannot do. **D** Firehose doesn't support Salesforce natively; Salesforce would need to push data, not pull it.
+
+---
+
+### Q26 — Kinesis Firehose Inline Format Conversion
+**Domain 1 | Key Services: Kinesis Firehose, Glue Data Catalog**
+
+A data team receives clickstream events via Kinesis Data Streams in JSON format. They want to deliver the data to S3 in Parquet format so Athena queries are cheaper — without writing any ETL code or deploying additional compute. The events have a consistent, known schema registered in the Glue Data Catalog. Which approach achieves inline format conversion with the least operational overhead?
+
+**A)** Use Kinesis Firehose as a consumer of the Kinesis Data Stream. Enable the Firehose record format conversion feature, specifying the Glue Data Catalog table that defines the schema. Firehose converts JSON to Parquet during delivery with no additional compute.
+
+**B)** Use Kinesis Firehose to deliver raw JSON to S3, then trigger a Glue ETL job via EventBridge on each file arrival to convert to Parquet.
+
+**C)** Use Managed Service for Apache Flink to read from the stream, apply a format transformation, and write Parquet to S3.
+
+**D)** Configure Kinesis Data Streams to output directly to S3 in Parquet format using the native format conversion setting.
+
+**✅ Correct Answer: A**
+
+**Explanation:** Kinesis Firehose has a built-in record format conversion feature that converts JSON to Parquet or ORC during delivery — zero additional compute or ETL jobs. The only prerequisite is a Glue Data Catalog table defining the schema (Firehose uses it for serialization). This is the purpose-built pattern for this use case. **B** adds a Glue job invocation per file — more latency, more cost, more components to fail. **C** Flink works but adds a continuously running application — far more operational overhead. **D** Kinesis Data Streams is a streaming buffer only; it delivers raw records as written and has no format conversion capability.
+
+---
+
+### Q27 — MSK vs Kinesis for Kafka Migration
+**Domain 1 | Key Services: MSK, Kinesis**
+
+A company is migrating a real-time fraud detection system from on-premises to AWS. The existing system uses Apache Kafka with 15 topics, consumer groups with manually managed offsets, Kafka Streams for stateful aggregations, and Kafka Connect for CDC from a PostgreSQL database. The migration must preserve all existing consumer group semantics and Kafka protocol compatibility. The team has deep Kafka expertise. Which service should they choose?
+
+**A)** Amazon Kinesis Data Streams with Enhanced Fan-Out for multiple consumers. Rewrite Kafka Streams logic using Managed Service for Apache Flink.
+
+**B)** Amazon MSK (Managed Streaming for Apache Kafka), which is fully Kafka-compatible — existing Kafka clients, consumer groups, Kafka Streams, and Kafka Connect work without code changes.
+
+**C)** Amazon Kinesis Data Streams with the Kinesis Consumer Library (KCL) replicating Kafka consumer group semantics.
+
+**D)** Amazon EventBridge with custom event buses per topic and EventBridge Pipes for stateful processing.
+
+**✅ Correct Answer: B**
+
+**Explanation:** MSK is managed Apache Kafka — the existing clients, consumer group protocols, Kafka Streams API, and Kafka Connect connectors all work without modification. When a scenario explicitly describes an existing Kafka deployment with Kafka-native features (consumer groups, Kafka Streams, Kafka Connect), MSK is always the answer. **A** Kinesis has fundamentally different semantics (shards vs partitions, different SDK, different retention model) — migrating would require rewriting all consumer code. **C** KCL approximates consumer group behavior but is a different API — existing Kafka client code cannot use it. **D** EventBridge cannot replicate Kafka semantics or stateful stream processing.
+
+---
+
+### Q28 — Lambda Parallelization Factor for Kinesis
+**Domain 1 | Key Services: Lambda, Kinesis**
+
+A Lambda function consumes records from a Kinesis Data Stream with 10 shards. `IteratorAge` is consistently high (> 5 minutes), indicating the consumer falls behind. Lambda processes each batch in approximately 8 seconds. The team has confirmed the function code is already optimized. They want to increase processing throughput **without changing the shard count or enabling Enhanced Fan-Out**. Which configuration achieves this?
+
+**A)** Increase the Lambda batch size from 100 to 10,000 records per invocation.
+
+**B)** Set the Lambda event source mapping `ParallelizationFactor` to 10. This allows up to 10 concurrent Lambda invocations per shard — 100 concurrent invocations across 10 shards — each processing a sequential subset of the shard.
+
+**C)** Increase the Lambda reserved concurrency limit from 10 to 100.
+
+**D)** Increase the Lambda timeout from 30 seconds to 5 minutes to allow larger batches to complete.
+
+**✅ Correct Answer: B**
+
+**Explanation:** `ParallelizationFactor` (range 1–10) enables multiple concurrent Lambda invocations per shard, each consuming a non-overlapping ordered subset of the shard's records. With 10 shards and factor=10, up to 100 concurrent Lambda invocations process records simultaneously — 10× the throughput with no shard changes. **A** a larger batch size reduces the number of invocations but each invocation still processes sequentially; total throughput doesn't increase proportionally because the function still runs one invocation per shard at a time by default. **C** reserved concurrency raises the ceiling but Kinesis only creates one concurrent invocation per shard by default — without changing `ParallelizationFactor`, the extra concurrency goes unused. **D** a longer timeout only matters if the function was timing out; it does not increase concurrency.
+
+---
+
+### Q29 — Glue Job Bookmarks for Incremental Processing
+**Domain 1 | Key Services: Glue**
+
+A Glue ETL job runs daily to process new log files landing in `s3://logs/year=/month=/day=/`. On day two, the team observes the job reprocessing all historical files — causing duplicate records in the output S3 location. The job currently has no incremental processing logic. What is the correct fix?
+
+**A)** Add code to the Glue job that calls `s3.list_objects_v2` with a `LastModified` filter to read only files from the past 24 hours.
+
+**B)** Enable Glue Job Bookmarks by setting `--job-bookmark-option job-bookmark-enable` in the job parameters and calling `job.commit()` at the end of successful processing. Glue will track which S3 keys were already processed and skip them on the next run.
+
+**C)** Use a Glue trigger with `StartingPosition=AFTER_SEQUENCE_NUMBER` to consume only new files since the last trigger.
+
+**D)** Add a pushdown predicate `year='2024' and month='01' and day='15'` hardcoded to today's date in the job script.
+
+**✅ Correct Answer: B**
+
+**Explanation:** Glue Job Bookmarks are the built-in mechanism for incremental S3 processing. When enabled, Glue records the S3 keys (and modification times) it processed at each `job.commit()`. On the next run, it skips everything before the bookmark. If a job fails before `commit()`, the bookmark is not advanced — the next run safely reprocesses the failed run's data. **A** `last_modified` filtering is fragile — S3 metadata changes on copy/replication and doesn't track Glue's logical processing position. **C** `StartingPosition=AFTER_SEQUENCE_NUMBER` is a Kinesis concept; it has no meaning in Glue S3 jobs. **D** hardcoding today's date makes the job non-rerunnable and fails on weekends or if the job is skipped for a day.
+
+---
+
+### Q30 — Glue DynamicFrame resolveChoice for Schema Conflicts
+**Domain 1 | Key Services: Glue, DynamicFrame**
+
+A Glue ETL job reads 3 years of event files from S3. Due to schema evolution, the `event_value` column is stored as `int` in 2021 files, `double` in 2022 files, and `string` in 2023 files. When the job calls `.toDF()` to convert the DynamicFrame to a Spark DataFrame for processing, it fails with a schema conflict error. What is the correct resolution?
+
+**A)** Filter the input to read only 2023 files (which have `string` type) and cast downstream in Spark SQL.
+
+**B)** Call `resolve_choice(specs=[("event_value", "cast:double")])` on the DynamicFrame before converting to a DataFrame. This casts all type variants to `double`, resolving the ambiguity before the DataFrame conversion.
+
+**C)** Enable the `--enable-update-catalog` Glue job parameter so Glue auto-selects the most common column type.
+
+**D)** Create separate Glue jobs for each year's files, each with a hardcoded schema, and union the results in a final Glue job.
+
+**✅ Correct Answer: B**
+
+**Explanation:** `DynamicFrame.resolve_choice()` is the purpose-built API for type conflicts across files with different schemas. When Glue reads files with ambiguous types, it represents them as a `choice` type in the DynamicFrame. Calling `resolve_choice(specs=[("event_value", "cast:double")])` tells Glue to coerce all variants (`int`, `double`, `string`) to `double`, producing a clean, consistent schema before `.toDF()`. **A** ignoring 2 years of data defeats the purpose of the analytics job. **C** `--enable-update-catalog` updates the Glue catalog schema when new columns are discovered — it does not resolve type conflicts for an existing column. **D** three separate jobs with a union adds complexity and doesn't leverage DynamicFrame's built-in capability.
+
+---
+
+### Q31 — Kinesis On-Demand vs Provisioned Mode
+**Domain 1 | Key Services: Kinesis Data Streams**
+
+A news platform has Kinesis Data Streams in Provisioned mode with 50 shards, sized for peak breaking-news traffic (50,000 events/second). On normal days, throughput drops to 500 events/second — leaving 49 shards idle. The team wants to eliminate the wasted idle shard cost without risking throttling during unpredictable traffic spikes. Operational simplicity is also required. Which change is most appropriate?
+
+**A)** Keep Provisioned mode but add an Application Auto Scaling policy on the Kinesis stream to add/remove shards based on the `IncomingBytes` CloudWatch metric.
+
+**B)** Switch to Kinesis Data Streams On-Demand mode. The stream automatically scales to match actual throughput (up to 200 MB/s write / 400 MB/s read by default) and you pay per GB processed — no shard management required.
+
+**C)** Reduce provisioned shards to 5 and configure CloudWatch alarms to alert the team to manually reshard before anticipated breaking news events.
+
+**D)** Replace Kinesis Data Streams with Kinesis Firehose, which auto-scales and has no shard concept.
+
+**✅ Correct Answer: B**
+
+**Explanation:** On-Demand mode is purpose-built for unpredictable, variable traffic. It automatically scales capacity for sudden spikes without any manual intervention or scaling policy, and charges per GB of data processed — not per shard-hour — eliminating idle cost. **A** Application Auto Scaling for Kinesis exists but scaling latency (adding shards takes several minutes) makes it risky for sudden breaking-news spikes. **C** manual resharding before events is operationally unreliable — breaking news is unplanned by definition. **D** Kinesis Firehose is a delivery service, not a real-time streaming buffer; it has mandatory buffering delays and cannot serve real-time consumers (Lambda, Flink, KCL applications) the way Data Streams does.
 
 ---
 
@@ -541,6 +655,12 @@ A company's DevOps team has `AdministratorAccess` to deploy and manage infrastru
 | 7 | B | D1 | Session windows → Flink, not Lambda |
 | 8 | C | D1 | Variable workload + no DevOps → EMR Serverless |
 | 9 | B | D1 | SaaS no-code integration → AppFlow |
+| 26 | A | D1 | Firehose inline JSON→Parquet conversion via Glue Catalog schema |
+| 27 | B | D1 | Kafka migration with consumer groups + Kafka Streams → MSK |
+| 28 | B | D1 | Lambda ParallelizationFactor increases throughput per shard |
+| 29 | B | D1 | Glue Job Bookmarks for incremental S3 processing |
+| 30 | B | D1 | DynamicFrame resolveChoice for cross-file type conflicts |
+| 31 | B | D1 | Kinesis On-Demand eliminates idle shard cost for variable traffic |
 | 10 | C | D2 | Distribution KEY on join column, SORT on filter column |
 | 11 | C | D2 | Eventual consistency = half the RCU cost |
 | 12 | B | D2 | Iceberg for ACID + time travel + native Athena |

@@ -514,6 +514,136 @@ aws s3api put-bucket-lifecycle-configuration \
 
 ---
 
+## S3 Inventory
+
+S3 Inventory generates a scheduled flat-file report listing all objects in a bucket and their metadata. An alternative to running expensive `LIST` API calls on large buckets.
+
+**Output:** CSV, ORC, or Parquet file delivered to a destination S3 bucket on a **daily or weekly** schedule.
+
+**Metadata available per object:**
+- Object key, size, last modified date, storage class
+- Encryption status (SSE-S3, SSE-KMS, SSE-C, or none)
+- Replication status, multipart upload flag, delete marker flag
+
+**Key use cases:**
+- **Compliance auditing:** "Which objects are not encrypted?" → filter the Inventory report by `EncryptionStatus != SSE-KMS`
+- **Cost analysis:** Identify unneeded or oversized objects without iterating through the bucket
+- **Input to S3 Batch Operations:** Inventory report serves as the manifest for bulk operations
+
+**Exam Patterns:**
+- "Audit which objects in a data lake bucket are stored without encryption — minimal API cost" → S3 Inventory (cheaper than paginating LIST operations on millions of objects)
+- "Generate a weekly report of all objects and their storage class" → S3 Inventory
+
+---
+
+## S3 Batch Operations
+
+Execute operations on **millions of S3 objects** with a single API call using a manifest (S3 Inventory report or custom CSV list).
+
+**Supported operations:**
+| Operation | Description |
+|---|---|
+| **Copy** | Bulk copy objects to another bucket (cross-region or same-region) |
+| **Invoke Lambda** | Run a Lambda function per object (custom transformations, tagging, validation) |
+| **Restore** | Bulk restore objects from Glacier |
+| **Replace ACL / tags** | Apply tags or ACL settings to millions of objects |
+| **Object Lock retention** | Set retention for bulk objects |
+| **Delete** | Bulk delete objects |
+
+**How It Works:**
+1. Generate or upload a manifest (S3 Inventory report or custom CSV: `bucket,key`)
+2. Create a Batch Operations job specifying the operation, manifest, and IAM role
+3. Optionally enable a completion report to S3
+
+```bash
+aws s3control create-job \
+  --account-id 123456789012 \
+  --operation '{"LambdaInvoke": {"FunctionArn": "arn:aws:lambda:..."}}' \
+  --manifest '{"Spec":{"Format":"S3BatchOperations_CSV_20180820","Fields":["Bucket","Key"]},"Location":{"ObjectArn":"arn:aws:s3:::my-bucket/manifest.csv","ETag":"..."}}'  \
+  --report '{"Bucket":"arn:aws:s3:::my-report-bucket","Format":"Report_CSV_20180820","Enabled":true,"Prefix":"batch-reports/","ReportScope":"AllTasks"}' \
+  --priority 10 \
+  --role-arn arn:aws:iam::123456789012:role/BatchOpsRole
+```
+
+**Exam Patterns:**
+- "Apply a new tag to 50 million existing S3 objects" → S3 Batch Operations (Replace Tags action)
+- "Restore all objects in a bucket from Glacier as part of a data migration" → S3 Batch Operations (Restore action)
+- "Run a Lambda function to re-encrypt every object in a bucket with a new KMS key" → S3 Batch Operations (Invoke Lambda)
+- "Replicate existing objects after enabling CRR — CRR only covers new objects" → S3 Batch Replication (a Batch Operations job type)
+
+---
+
+## S3 Storage Lens
+
+Organization-wide S3 storage analytics. Aggregates metrics across **all accounts and all buckets** in an AWS Organization into a single dashboard.
+
+**Key metrics provided:**
+- Total bytes stored, object count, per-storage-class breakdown
+- Incomplete multipart upload accumulation (find cost waste)
+- Non-current version storage (find versioning cost bloat)
+- Bucket activity metrics (PUT/GET/DELETE counts)
+
+**Two tiers:**
+| Tier | Cost | Metrics |
+|---|---|---|
+| **Free (Summary)** | Free | 15 core metrics (storage, object count) |
+| **Advanced** | Paid | 35+ metrics including activity metrics, detailed recommendations |
+
+**Common workflow:**
+- Enable Storage Lens at the Organization level
+- Identify buckets with high incomplete MPU storage → add lifecycle rules to abort them
+- Identify buckets with massive non-current version accumulation → add expiration rules
+- Export metrics to S3 for historical trending with Athena
+
+**Exam Patterns:**
+- "Identify which S3 buckets across the organization are accumulating costs from incomplete multipart uploads" → S3 Storage Lens
+- "Get organization-wide visibility into S3 storage usage across 50 AWS accounts" → S3 Storage Lens
+- "Find buckets where versioning is causing unexpected storage cost growth" → S3 Storage Lens (non-current version metrics)
+
+---
+
+## AWS Transfer Family
+
+Managed file transfer service that provides SFTP, FTPS, FTP, and AS2 endpoints **backed by S3 or EFS** — without changing client-side tooling or protocols.
+
+**Use case:** Legacy systems, partners, or IoT devices that can only send data via SFTP/FTP. Transfer Family creates a managed endpoint so those clients continue using their existing protocol while data lands directly in S3.
+
+**Supported protocols:**
+| Protocol | Description | Use Case |
+|---|---|---|
+| **SFTP** (SSH FTP) | Encrypted file transfer over SSH | Most common; partner data ingestion |
+| **FTPS** (FTP over TLS) | FTP with TLS encryption | Legacy financial/healthcare systems |
+| **FTP** | Unencrypted (VPC only) | Internal-only, within VPC |
+| **AS2** | EDI message exchange standard | B2B supply chain, EDI partners |
+
+**Key Features:**
+- Files uploaded via SFTP/FTPS land directly in an S3 bucket — no EC2 server to manage
+- **Custom identity provider:** Integrate with Active Directory, LDAP, or a custom Lambda-based auth system
+- **VPC endpoint support:** Restrict access to within your VPC (no public internet exposure)
+- Supports both S3 and EFS as storage backends
+
+**Architecture:**
+```
+Partner/Client (SFTP client)
+        │
+        ↓
+AWS Transfer Family endpoint (managed SFTP server)
+        │
+        ↓
+Amazon S3 bucket (data lands here, triggering downstream pipeline)
+        │
+        ↓
+S3 Event → EventBridge → Glue/Lambda (process the file)
+```
+
+**Exam Patterns:**
+- "On-premises system uses SFTP to transfer files — ingest into S3 without changing the source system" → AWS Transfer Family
+- "Partner sends EDI messages via AS2 — receive them in S3" → AWS Transfer Family with AS2 protocol
+- "Provide external partners an SFTP endpoint to upload data to your data lake" → AWS Transfer Family (not an EC2-based SFTP server)
+- "SFTP users should authenticate via Active Directory" → Transfer Family with AD identity provider
+
+---
+
 ## Exam Gotchas
 
 - **Intelligent-Tiering** = answer when "access patterns are unknown" or "minimize retrieval cost risk"
@@ -533,3 +663,7 @@ aws s3api put-bucket-lifecycle-configuration \
 - **Non-current version costs accumulate silently when versioning is on.** Add non-current version expiration lifecycle rules or costs grow indefinitely.
 - **SSE-C objects cannot be replicated** — AWS doesn't store the key material, so it cannot re-encrypt objects during replication.
 - **Transfer Acceleration adds cost.** Only use it when the distance-related latency is measurably hurting upload performance. AWS provides a speed comparison tool to verify it's beneficial for your use case before enabling.
+- **S3 Inventory is cheaper than LIST for compliance audits on large buckets.** Generating an Inventory report (daily/weekly) is far cheaper than paginating `s3:ListObjectsV2` across millions of objects. Use Inventory as the manifest for S3 Batch Operations.
+- **S3 Batch Operations requires a manifest** — either an S3 Inventory report or a custom CSV listing `bucket,key` pairs. The job's IAM role needs permissions to both read the manifest and perform the operation (e.g., `s3:PutObjectTagging`).
+- **S3 Storage Lens works at the Organization level** — it is the go-to tool for cross-account, cross-bucket visibility. For bucket-level metrics on one account, CloudWatch S3 metrics are sufficient.
+- **AWS Transfer Family is the answer when a source system uses SFTP and cannot be modified.** The endpoint looks like a standard SFTP server to the client; data lands in S3. Do not provision an EC2 SFTP server — Transfer Family is fully managed.

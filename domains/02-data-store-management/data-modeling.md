@@ -353,12 +353,14 @@ Sort keys determine the physical sort order of rows on disk. Redshift skips enti
 
 **Two sort key types:**
 
-| Type | Behavior | Best For |
+| Type | Behavior | Status |
 |---|---|---|
-| **Compound** | Sorts by columns in declared order (leftmost column most significant) | Queries that filter/sort on leading columns; ORDER BY matching sort key |
-| **Interleaved** | Treats each column with equal weight | Ad-hoc queries filtering on any sort key column |
+| **Compound** | Sorts by columns in declared order (leftmost column most significant) | Active — use this |
+| **Interleaved** | Treats each column with equal weight | **Deprecated** — do not create new tables with this |
 
-Compound is more common and efficient for predictable query patterns. Interleaved requires `VACUUM REINDEX` for maintenance and has higher overhead.
+Compound sort keys are the correct choice for all new tables. Interleaved sort keys have been **deprecated by AWS** — `VACUUM REINDEX` (required to maintain their effectiveness) is prohibitively slow on large tables. For unpredictable multi-column filter patterns, use a compound sort key on the most commonly filtered column — not interleaved.
+
+> **Exam trap:** If a question asks which sort key handles unpredictable multi-column filters, the answer is still **compound sort key** — interleaved is a distractor.
 
 ### VACUUM and ANALYZE
 

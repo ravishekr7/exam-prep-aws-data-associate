@@ -184,7 +184,7 @@ A marketing operations team needs to sync customer records from Salesforce CRM i
 
 ---
 
-### Q26 — Kinesis Firehose Inline Format Conversion
+### Q10 — Kinesis Firehose Inline Format Conversion
 **Domain 1 | Key Services: Kinesis Firehose, Glue Data Catalog**
 
 A data team receives clickstream events via Kinesis Data Streams in JSON format. They want to deliver the data to S3 in Parquet format so Athena queries are cheaper — without writing any ETL code or deploying additional compute. The events have a consistent, known schema registered in the Glue Data Catalog. Which approach achieves inline format conversion with the least operational overhead?
@@ -203,7 +203,7 @@ A data team receives clickstream events via Kinesis Data Streams in JSON format.
 
 ---
 
-### Q27 — MSK vs Kinesis for Kafka Migration
+### Q11 — MSK vs Kinesis for Kafka Migration
 **Domain 1 | Key Services: MSK, Kinesis**
 
 A company is migrating a real-time fraud detection system from on-premises to AWS. The existing system uses Apache Kafka with 15 topics, consumer groups with manually managed offsets, Kafka Streams for stateful aggregations, and Kafka Connect for CDC from a PostgreSQL database. The migration must preserve all existing consumer group semantics and Kafka protocol compatibility. The team has deep Kafka expertise. Which service should they choose?
@@ -222,7 +222,7 @@ A company is migrating a real-time fraud detection system from on-premises to AW
 
 ---
 
-### Q28 — Lambda Parallelization Factor for Kinesis
+### Q12 — Lambda Parallelization Factor for Kinesis
 **Domain 1 | Key Services: Lambda, Kinesis**
 
 A Lambda function consumes records from a Kinesis Data Stream with 10 shards. `IteratorAge` is consistently high (> 5 minutes), indicating the consumer falls behind. Lambda processes each batch in approximately 8 seconds. The team has confirmed the function code is already optimized. They want to increase processing throughput **without changing the shard count or enabling Enhanced Fan-Out**. Which configuration achieves this?
@@ -241,7 +241,7 @@ A Lambda function consumes records from a Kinesis Data Stream with 10 shards. `I
 
 ---
 
-### Q29 — Glue Job Bookmarks for Incremental Processing
+### Q13 — Glue Job Bookmarks for Incremental Processing
 **Domain 1 | Key Services: Glue**
 
 A Glue ETL job runs daily to process new log files landing in `s3://logs/year=/month=/day=/`. On day two, the team observes the job reprocessing all historical files — causing duplicate records in the output S3 location. The job currently has no incremental processing logic. What is the correct fix?
@@ -260,7 +260,7 @@ A Glue ETL job runs daily to process new log files landing in `s3://logs/year=/m
 
 ---
 
-### Q30 — Glue DynamicFrame resolveChoice for Schema Conflicts
+### Q14 — Glue DynamicFrame resolveChoice for Schema Conflicts
 **Domain 1 | Key Services: Glue, DynamicFrame**
 
 A Glue ETL job reads 3 years of event files from S3. Due to schema evolution, the `event_value` column is stored as `int` in 2021 files, `double` in 2022 files, and `string` in 2023 files. When the job calls `.toDF()` to convert the DynamicFrame to a Spark DataFrame for processing, it fails with a schema conflict error. What is the correct resolution?
@@ -279,7 +279,7 @@ A Glue ETL job reads 3 years of event files from S3. Due to schema evolution, th
 
 ---
 
-### Q31 — Kinesis On-Demand vs Provisioned Mode
+### Q15 — Kinesis On-Demand vs Provisioned Mode
 **Domain 1 | Key Services: Kinesis Data Streams**
 
 A news platform has Kinesis Data Streams in Provisioned mode with 50 shards, sized for peak breaking-news traffic (50,000 events/second). On normal days, throughput drops to 500 events/second — leaving 49 shards idle. The team wants to eliminate the wasted idle shard cost without risking throttling during unpredictable traffic spikes. Operational simplicity is also required. Which change is most appropriate?
@@ -302,7 +302,7 @@ A news platform has Kinesis Data Streams in Provisioned mode with 50 shards, siz
 
 ---
 
-### Q10 — Redshift Distribution Key Selection
+### Q16 — Redshift Distribution Key Selection
 **Domain 2 | Key Services: Redshift**
 
 A retail data warehouse team is designing their Redshift schema. The `fact_orders` table has 2 billion rows. The `dim_products` table has 500,000 rows. The `dim_customers` table has 10 million rows. The most common query joins `fact_orders` and `dim_customers` on `customer_id`, and frequently filters by `order_date`. Which distribution and sort key configuration is most appropriate for `fact_orders`?
@@ -321,7 +321,7 @@ A retail data warehouse team is designing their Redshift schema. The `fact_order
 
 ---
 
-### Q11 — DynamoDB RCU Calculation
+### Q17 — DynamoDB RCU Calculation
 **Domain 2 | Key Services: DynamoDB**
 
 A product catalog application reads product details for an e-commerce website. Each product item is 6 KB. The application performs 200 reads per second, and the business has accepted eventual consistency for the product catalog (prices update in the background, slight delay acceptable). How many RCUs should be provisioned?
@@ -346,7 +346,7 @@ A product catalog application reads product details for an e-commerce website. E
 
 ---
 
-### Q12 — Open Table Format Selection
+### Q18 — Open Table Format Selection
 **Domain 2 | Key Services: Iceberg, Hudi, Athena**
 
 A healthcare analytics company stores 10 years of patient records in S3 as Parquet files. They need to: (1) comply with HIPAA's data rectification requirements by updating incorrect records, (2) delete records for patients who opt out, (3) query historical data as it existed on a specific date for audit purposes, and (4) query the data using Athena without loading it into a database. Which solution best meets all four requirements?
@@ -365,7 +365,7 @@ A healthcare analytics company stores 10 years of patient records in S3 as Parqu
 
 ---
 
-### Q13 — S3 Table Format and Compaction
+### Q19 — S3 Table Format and Compaction
 **Domain 2 | Key Services: S3 Tables, Iceberg**
 
 A startup is building a new data lakehouse from scratch. They expect high-frequency writes (streaming from Kinesis) creating many small files, and they want Iceberg ACID capabilities. Their data engineering team is small (2 people) and cannot spend time managing compaction jobs, snapshot cleanup, or metadata maintenance. Which solution minimizes operational overhead?
@@ -384,7 +384,7 @@ A startup is building a new data lakehouse from scratch. They expect high-freque
 
 ---
 
-### Q14 — Lake Formation vs S3 Policies
+### Q20 — Lake Formation vs S3 Policies
 **Domain 2 | Key Services: Lake Formation, Athena**
 
 A data analyst has full S3 read access via an IAM policy (`s3:GetObject` on `arn:aws:s3:::data-lake-bucket/*`) and Athena permissions. However, when they run an Athena query on the `orders` table, they receive AccessDenied. The table metadata is in Glue Data Catalog, and the S3 location is registered with Lake Formation. What is the most likely cause?
@@ -403,7 +403,7 @@ A data analyst has full S3 read access via an IAM policy (`s3:GetObject` on `arn
 
 ---
 
-### Q15 — Redshift Sort Key vs WLM
+### Q21 — Redshift Sort Key vs WLM
 **Domain 2 | Key Services: Redshift**
 
 A Redshift data warehouse serves both a BI reporting team (running 5-10 complex aggregation queries per minute on the previous day's data, filtered by `report_date`) and a data engineering team (running nightly batch loads via COPY commands and 2-3 hour SQL transformations). BI users complain that their dashboard queries sometimes take 5+ minutes instead of the usual 30 seconds. The ETL jobs run between 2 AM and 6 AM. What is the most effective combination of changes?
@@ -426,7 +426,7 @@ A Redshift data warehouse serves both a BI reporting team (running 5-10 complex 
 
 ---
 
-### Q16 — Data Quality Gates
+### Q22 — Data Quality Gates
 **Domain 3 | Key Services: Glue Data Quality, Step Functions**
 
 A financial services company runs a daily ETL pipeline that loads transaction data from S3 into Amazon Redshift. The pipeline has no data quality checks. Last month, a corrupt source file (with null transaction IDs) was loaded into Redshift, causing downstream risk reports to produce incorrect values. The compliance team requires that: (1) any batch with null transaction IDs must not be loaded, (2) batches with <10,000 records must be flagged as suspicious and held for review, (3) all data quality results must be auditable. Which solution meets all three requirements?
@@ -445,7 +445,7 @@ A financial services company runs a daily ETL pipeline that loads transaction da
 
 ---
 
-### Q17 — Kinesis Error Handling
+### Q23 — Kinesis Error Handling
 **Domain 3 | Key Services: Kinesis, Lambda, SQS**
 
 A Lambda function processes records from a Kinesis Data Stream in batches of 100. One record in a batch causes the Lambda function to throw an unhandled exception. The function fails and Lambda retries the entire batch. The same bad record continues to cause failures, blocking all records behind it in the shard. The team needs to: isolate bad records without blocking the shard, preserve failed records for investigation, and limit retry attempts. Which configuration resolves this?
@@ -464,7 +464,7 @@ A Lambda function processes records from a Kinesis Data Stream in batches of 100
 
 ---
 
-### Q18 — CloudWatch Monitoring Strategy
+### Q24 — CloudWatch Monitoring Strategy
 **Domain 3 | Key Services: CloudWatch, Glue, Kinesis**
 
 A data platform team maintains 50 Glue ETL jobs, 3 Kinesis streams, and 2 EMR clusters. They want to detect: (1) Glue jobs that take >2x their baseline duration, (2) Kinesis consumers falling behind, (3) EMR cluster running with high YARN memory utilization. What is the most scalable monitoring setup?
@@ -483,7 +483,7 @@ A data platform team maintains 50 Glue ETL jobs, 3 Kinesis streams, and 2 EMR cl
 
 ---
 
-### Q19 — Cost Optimization in Data Pipelines
+### Q25 — Cost Optimization in Data Pipelines
 **Domain 3 | Key Services: Athena, S3, Glue**
 
 A startup runs ad-hoc analytics on 50 TB of event data stored in S3 as uncompressed JSON files. Their Athena costs are $3,000/month despite running only 100 queries/day. Each query scans the entire dataset. The data is partitioned by `event_date`. What changes would most significantly reduce Athena query costs?
@@ -502,7 +502,7 @@ A startup runs ad-hoc analytics on 50 TB of event data stored in S3 as uncompres
 
 ---
 
-### Q20 — Step Functions Error Handling
+### Q26 — Step Functions Error Handling
 **Domain 3 | Key Services: Step Functions**
 
 A data pipeline uses Step Functions Standard Workflow to orchestrate a Glue ETL job, a data quality check, and a Redshift COPY command. The Glue job occasionally fails due to transient AWS service issues (`Lambda.ServiceException`). The team wants: up to 3 retries with exponential backoff for transient errors, but if the data quality check fails with a custom error `DataQualityFailed`, the workflow should immediately go to an error notification state without retrying, and the original input data should be preserved in the notification state.
@@ -547,7 +547,7 @@ Which Retry/Catch configuration is correct for the data quality state?
 
 ---
 
-### Q21 — Lake Formation Column Security
+### Q27 — Lake Formation Column Security
 **Domain 4 | Key Services: Lake Formation, Athena**
 
 A healthcare analytics company stores patient records in S3 with the Glue Data Catalog managing the schema. The `patients` table has columns: `patient_id`, `name`, `dob`, `ssn`, `diagnosis`, `treatment_code`. Data analysts should be able to query diagnoses and treatment codes for population health studies but must never see `ssn`, `name`, or `dob`. Compliance requires that this restriction is enforced at the data access layer, not just in application code. Which solution is most appropriate?
@@ -566,7 +566,7 @@ A healthcare analytics company stores patient records in S3 with the Glue Data C
 
 ---
 
-### Q22 — IAM Policy Evaluation
+### Q28 — IAM Policy Evaluation
 **Domain 4 | Key Services: IAM, S3, SCP**
 
 A developer in an AWS account is a member of the `DataEngineers` IAM group, which has a policy allowing `s3:*` on all S3 resources. The developer also has an inline policy attached directly to their user that explicitly denies `s3:DeleteObject`. The company's AWS Organization SCP allows all S3 actions for this account. The developer tries to delete an S3 object. What happens?
@@ -585,7 +585,7 @@ A developer in an AWS account is a member of the `DataEngineers` IAM group, whic
 
 ---
 
-### Q23 — KMS and Encryption
+### Q29 — KMS and Encryption
 **Domain 4 | Key Services: KMS, S3, CloudTrail**
 
 A financial institution is implementing a compliance requirement that mandates: (1) all data in S3 must be encrypted, (2) encryption keys must be rotatable annually, (3) every access to an encryption key must be audited with the identity of the requester, the action performed, and the timestamp. Which encryption option satisfies all three requirements?
@@ -604,7 +604,7 @@ A financial institution is implementing a compliance requirement that mandates: 
 
 ---
 
-### Q24 — VPC Endpoint and Data Perimeter
+### Q30 — VPC Endpoint and Data Perimeter
 **Domain 4 | Key Services: VPC Endpoints, S3**
 
 A large enterprise wants to prevent data exfiltration from their AWS VPC. Specifically, they want to ensure that EC2 instances and Glue jobs running within their VPC **cannot upload data to any S3 bucket outside their AWS Organization**, even if an employee has valid AWS credentials and IAM permissions to external buckets. Which mechanism enforces this restriction at the network level?
@@ -623,7 +623,7 @@ A large enterprise wants to prevent data exfiltration from their AWS VPC. Specif
 
 ---
 
-### Q25 — Permission Boundaries and Privilege Escalation
+### Q31 — Permission Boundaries and Privilege Escalation
 **Domain 4 | Key Services: IAM, Permission Boundaries**
 
 A company's DevOps team has `AdministratorAccess` to deploy and manage infrastructure. Security is concerned that developers could use this access to create IAM roles with `AdministratorAccess` for their applications, effectively giving their apps unlimited AWS permissions. The security team wants developers to be able to create IAM roles for their applications but restrict those roles to only the S3 and DynamoDB permissions their apps actually need. Which mechanism achieves this without removing developers' ability to manage infrastructure?
@@ -655,25 +655,25 @@ A company's DevOps team has `AdministratorAccess` to deploy and manage infrastru
 | 7 | B | D1 | Session windows → Flink, not Lambda |
 | 8 | C | D1 | Variable workload + no DevOps → EMR Serverless |
 | 9 | B | D1 | SaaS no-code integration → AppFlow |
-| 26 | A | D1 | Firehose inline JSON→Parquet conversion via Glue Catalog schema |
-| 27 | B | D1 | Kafka migration with consumer groups + Kafka Streams → MSK |
-| 28 | B | D1 | Lambda ParallelizationFactor increases throughput per shard |
-| 29 | B | D1 | Glue Job Bookmarks for incremental S3 processing |
-| 30 | B | D1 | DynamicFrame resolveChoice for cross-file type conflicts |
-| 31 | B | D1 | Kinesis On-Demand eliminates idle shard cost for variable traffic |
-| 10 | C | D2 | Distribution KEY on join column, SORT on filter column |
-| 11 | C | D2 | Eventual consistency = half the RCU cost |
-| 12 | B | D2 | Iceberg for ACID + time travel + native Athena |
-| 13 | B | D2 | Zero operational overhead → S3 Tables |
-| 14 | C | D2 | Lake Formation supersedes S3 IAM for governed tables |
-| 15 | A | D2 | Sort key + Auto WLM + SQA for mixed workloads |
-| 16 | B | D3 | Glue DQ DQDL with FAIL + QUARANTINE actions |
-| 17 | B | D3 | bisectBatchOnFunctionError + maxRetries + DLQ |
-| 18 | B | D3 | Native CloudWatch alarms per service metric |
-| 19 | A | D3 | Parquet + partition pruning + caching → reduce scan |
-| 20 | C | D3 | Step Functions Retry order + ResultPath: "$.error" |
-| 21 | B | D4 | Lake Formation column exclusion at data layer |
-| 22 | C | D4 | Explicit Deny always wins |
-| 23 | C | D4 | CMK = rotation control + CloudTrail audit |
-| 24 | B | D4 | VPC Endpoint Policy + aws:ResourceOrgID |
-| 25 | C | D4 | Permission Boundaries for delegated role creation |
+| 10 | A | D1 | Firehose inline JSON→Parquet conversion via Glue Catalog schema |
+| 11 | B | D1 | Kafka migration with consumer groups + Kafka Streams → MSK |
+| 12 | B | D1 | Lambda ParallelizationFactor increases throughput per shard |
+| 13 | B | D1 | Glue Job Bookmarks for incremental S3 processing |
+| 14 | B | D1 | DynamicFrame resolveChoice for cross-file type conflicts |
+| 15 | B | D1 | Kinesis On-Demand eliminates idle shard cost for variable traffic |
+| 16 | C | D2 | Distribution KEY on join column, SORT on filter column |
+| 17 | C | D2 | Eventual consistency = half the RCU cost |
+| 18 | B | D2 | Iceberg for ACID + time travel + native Athena |
+| 19 | B | D2 | Zero operational overhead → S3 Tables |
+| 20 | C | D2 | Lake Formation supersedes S3 IAM for governed tables |
+| 21 | A | D2 | Sort key + Auto WLM + SQA for mixed workloads |
+| 22 | B | D3 | Glue DQ DQDL with FAIL + QUARANTINE actions |
+| 23 | B | D3 | bisectBatchOnFunctionError + maxRetries + DLQ |
+| 24 | B | D3 | Native CloudWatch alarms per service metric |
+| 25 | A | D3 | Parquet + partition pruning + caching → reduce scan |
+| 26 | C | D3 | Step Functions Retry order + ResultPath: "$.error" |
+| 27 | B | D4 | Lake Formation column exclusion at data layer |
+| 28 | C | D4 | Explicit Deny always wins |
+| 29 | C | D4 | CMK = rotation control + CloudTrail audit |
+| 30 | B | D4 | VPC Endpoint Policy + aws:ResourceOrgID |
+| 31 | C | D4 | Permission Boundaries for delegated role creation |
